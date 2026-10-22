@@ -38,6 +38,16 @@ export function createActions({ store, auth, access, forms }) {
     const used = (await store.byClub('requests', club.id)).filter(r => r.late && r.createdAt > since).length;
     return { used, blockedUntil: club.lateBlockUntil || null };
   }
+  // Give an advisor a club (only a club that has no advisor yet, since each club has one advisor)
+  async function assignAdvisorClub(advisorId, clubId) {
+    if (!clubId || clubId === '__none') return;
+    const club = await activeClub(String(clubId));
+    need(!club.advisorId || club.advisorId === advisorId, `${club.name} already has an advisor. Change it from the Clubs page.`);
+    const other = (await store.all('clubs')).find(c => !c.archived && c.advisorId === advisorId && c.id !== club.id);
+    need(!other, `This advisor already advises ${other?.name}.`);
+    club.advisorId = advisorId;
+    await store.put('clubs', club);
+  }
   const needsDesign = services => DESIGN_GROUPS.some(g => (services?.[g]?.items || []).length);
   const saoChecks = r => (FORMS[r.type].saoChecks || []).filter(c => c.when(r.data || {}));
   const needsHardCopy = r => !!(r.data?.design || needsDesign(r.data?.services));
@@ -310,8 +320,12 @@ export function createActions({ store, auth, access, forms }) {
         const a = await store.users.get(String(b.id));
         need(a && a.role === 'advisor', 'Advisor not found.', 404);
         a.name = name; a.signName = name; await store.users.put(a);
-      } else await store.users.put({ id: uid('adv'), name, role: 'advisor', title: 'Academic Advisor', signName: name });
-      return {};
+        return { id: a.id };
+      }
+      const id = uid('adv');
+      await store.users.put({ id, name, role: 'advisor', title: 'Academic Advisor', signName: name });
+      await assignAdvisorClub(id, b.clubId);
+      return { id };
     },
     async removeAdvisor(user, b) {
       onlySao(user);
@@ -325,10 +339,14 @@ export function createActions({ store, auth, access, forms }) {
     // ---------------- accounts ----------------
     async saveAccount(user, b) {
       onlySao(user);
-      const roles = ['sao', 'vp', 'clinic'];
+      const roles = ['sao', 'vp', 'clinic', 'advisor'];
       let u = b.id ? await store.users.get(String(b.id)) : null;
       if (b.id) need(u, 'Account not found.', 404);
-      else { need(roles.includes(b.role), 'Choose a role.'); u = { id: uid(b.role), role: b.role }; }
+      else {
+        need(roles.includes(b.role), 'Choose a role.');
+        u = { id: uid(b.role === 'advisor' ? 'adv' : b.role), role: b.role };
+        if (b.role === 'advisor') u.title = 'Academic Advisor';
+      }
       const name = text(b.name, 100);
       need(name, 'Type the name.');
       u.name = name;
@@ -345,6 +363,7 @@ export function createActions({ store, auth, access, forms }) {
       await store.users.put(u);
       if (email || hash) await store.users.setLogin(u.id, email || null, hash);
       if (hash) await auth.endAllSessions(u.id);     // a new password signs the person out everywhere
+      if (u.role === 'advisor' && !b.id) await assignAdvisorClub(u.id, b.clubId);
       return { id: u.id };
     },
     async setAccountDisabled(user, b) {

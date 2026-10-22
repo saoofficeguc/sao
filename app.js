@@ -695,12 +695,14 @@ function pageAccounts(el, u) {
     act('setAccountDisabled', { id: x.id, disabled: disable }, disable ? 'Account disabled' : 'Account enabled');
   });
 }
+function randomPassword() { const c = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'; const a = new Uint32Array(10); crypto.getRandomValues(a); return [...a].map(n => c[n % c.length]).join('') + '7'; }
 function accountModal(x) {
   const isNew = !x;
-  const randomPassword = () => { const c = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'; const a = new Uint32Array(10); crypto.getRandomValues(a); return [...a].map(n => c[n % c.length]).join('') + '7'; };
   openModal({
     title: `<h2>${isNew ? 'Add an account' : esc(x.name)}</h2>${isNew ? '' : `<div class="small muted">${esc(ROLE_LABEL[x.role])}</div>`}`,
-    body: `${isNew ? `<div class="field"><label for="acRole">Role</label><select id="acRole"><option value="sao">SAO Office staff</option><option value="vp">Vice President</option><option value="clinic">GUC Clinic</option></select></div>` : ''}
+    body: `${isNew ? `<div class="field"><label for="acRole">Role</label><select id="acRole"><option value="sao">SAO Office staff</option><option value="advisor">Academic Advisor</option><option value="vp">Vice President</option><option value="clinic">GUC Clinic</option></select></div>
+      <div class="field hidden" id="acClubRow"><label for="acClub">Club</label><select id="acClub"><option value="__none">No club yet</option>${freeClubOptions()}</select>
+        <span class="small muted">Only clubs without an advisor are listed.</span></div>` : ''}
       <div class="form-row"><div class="field"><label for="acName">Name</label><input id="acName" value="${esc(x?.name || '')}"></div>
         ${x?.role === 'rep' ? '' : `<div class="field"><label for="acTitle">Title</label><input id="acTitle" value="${esc(x?.title || '')}" placeholder="e.g. GUC Vice President"></div>`}</div>
       ${x?.role === 'rep' ? '' : `<div class="field"><label for="acSign">Name on signatures</label><input id="acSign" value="${esc(x?.signName || '')}" placeholder="e.g. Dr. Ehab Abo El-Kheir"></div>`}
@@ -711,7 +713,11 @@ function accountModal(x) {
     foot: `<button class="btn" data-close>Cancel</button><button class="btn primary" id="acSave">Save</button>`,
     onMount: m => {
       $('#acGen', m).onclick = () => { $('#acPass', m).value = randomPassword(); };
-      $('#acSave', m).onclick = () => act('saveAccount', {
+      if ($('#acRole', m)) {
+        const upd = () => { const adv = $('#acRole', m).value === 'advisor'; $('#acClubRow', m).classList.toggle('hidden', !adv); if (adv && !$('#acTitle', m).value) $('#acTitle', m).value = 'Academic Advisor'; };
+        $('#acRole', m).onchange = upd; upd();
+      }
+      $('#acSave', m).onclick = () => act('saveAccount', { clubId: $('#acClub', m)?.value,
         id: x?.id, role: isNew ? $('#acRole', m).value : x.role, name: $('#acName', m).value, title: $('#acTitle', m)?.value, signName: $('#acSign', m)?.value,
         email: $('#acEmail', m).value, password: $('#acPass', m).value || undefined,
       }, 'Account saved');
@@ -857,7 +863,13 @@ function pageClubs(el) {
   const advisors = state.users.filter(x => x.role === 'advisor' && !x.disabled);
   const removed = state.clubs.filter(c => c.archived);
   el.innerHTML = `<div class="page-head"><div><h1>Clubs</h1><p class="muted">${clubs.length} Active Working Groups. Each club has one Academic Advisor, and an advisor can advise only one club.</p></div>
-      <div class="actions"><button class="btn primary" id="addClub">+ Add club</button></div></div>
+      <div class="actions"><button class="btn" id="addAdvisor">+ Add advisor</button><button class="btn primary" id="addClub">+ Add club</button></div></div>
+    <div class="card" style="margin-bottom:16px"><div class="page-head" style="margin-bottom:8px"><div><h2>Academic Advisors</h2><p class="muted small">Each club has one advisor. ${advisors.length} advisor(s); ${clubs.filter(c => !c.advisorId).length} club(s) still without one.</p></div>
+      </div>
+      <div class="table-wrap"><table><thead><tr><th>Name</th><th>Club</th><th></th></tr></thead><tbody>
+      ${advisors.map(a => { const c = advisorClub(a.id); return `<tr><td><b>${esc(a.name)}</b></td><td>${c ? clubCell(c.id) : '<span class="badge amber">No club</span>'}</td>
+        <td class="num"><button class="btn sm" data-rename-adv="${a.id}">Rename</button> ${c ? '' : `<button class="btn sm ghost-danger" data-remove-adv="${a.id}">Remove</button>`}</td></tr>`; }).join('')}
+      </tbody></table></div></div>
     <div class="clubs-grid">${clubs.map(c => {
       const rep = state.users.find(x => x.role === 'rep' && x.clubId === c.id && !x.disabled);
       return `<div class="card club-card">${clubLogo(c.id, 'lg2')}
@@ -868,12 +880,6 @@ function pageClubs(el) {
           <label class="btn sm" for="lf-${c.id}">${c.logo ? 'Logo' : 'Add logo'}</label>
           <input id="lf-${c.id}" data-logo="${c.id}" type="file" accept="image/png,image/jpeg,image/svg+xml" class="hidden">
           <button class="btn sm ghost-danger" data-remove-club="${c.id}">Remove</button></div></div></div>`; }).join('')}</div>
-    <div class="card" style="margin-top:16px"><div class="page-head" style="margin-bottom:8px"><div><h2>Academic Advisors</h2><p class="muted small">An advisor without a club can be given to a new club or removed.</p></div>
-      <button class="btn sm" id="addAdvisor">+ Add advisor</button></div>
-      <div class="table-wrap"><table><thead><tr><th>Name</th><th>Club</th><th></th></tr></thead><tbody>
-      ${advisors.map(a => { const c = advisorClub(a.id); return `<tr><td><b>${esc(a.name)}</b></td><td>${c ? clubCell(c.id) : '<span class="badge amber">No club</span>'}</td>
-        <td class="num"><button class="btn sm" data-rename-adv="${a.id}">Rename</button> ${c ? '' : `<button class="btn sm ghost-danger" data-remove-adv="${a.id}">Remove</button>`}</td></tr>`; }).join('')}
-      </tbody></table></div></div>
     ${removed.length ? `<div class="card" style="margin-top:16px"><h2>Removed clubs</h2><p class="muted small">Their past paperwork stays in the history. Remaining money was moved to the SAO Office account.</p>
       ${removed.map(c => `<div class="list-item">${clubCell(c.id)}<span class="small muted">removed ${fmtDate(c.archivedAt)}</span></div>`).join('')}</div>` : ''}`;
   $$('[data-logo]', el).forEach(i => i.onchange = e => setClubLogo(i.dataset.logo, e.target.files[0]));
@@ -936,17 +942,28 @@ function removeClubModal(club) {
 }
 
 // Add or rename an Academic Advisor
+// Clubs that still need an advisor, as <option>s
+const freeClubOptions = () => activeClubs().filter(c => !c.advisorId).map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
 function advisorModal(adv) {
   openModal({
     title: `<h2>${adv ? 'Rename advisor' : 'Add an Academic Advisor'}</h2>`,
     body: `<div class="field"><label for="aName">Full name</label><input id="aName" value="${esc(adv?.name || '')}" placeholder="e.g. Dr. Nour Adel"></div>
-      ${adv ? '' : '<p class="small muted">The new advisor has no club yet. Give them one by adding a club or editing a club.</p>'}`,
+      ${adv ? '' : `<div class="field"><label for="aClub">Club</label><select id="aClub"><option value="__none">No club yet</option>${freeClubOptions()}</select>
+          <span class="small muted">Only clubs without an advisor are listed.</span></div>
+        <div class="field"><label for="aEmail">Email (to sign in) - optional</label><input id="aEmail" type="email" placeholder="name@guc.edu.eg"></div>
+        <div class="field"><label for="aPass">Password - optional</label><div style="display:flex;gap:8px"><input id="aPass" type="text" autocomplete="off"><button class="btn sm" type="button" id="aGen">Generate</button></div>
+          <span class="small muted">You can also set the sign-in later on the Accounts page.</span></div>`}`,
     foot: `<button class="btn" data-close>Cancel</button><button class="btn primary" id="aSave">${adv ? 'Save' : 'Add advisor'}</button>`,
     onMount: m => {
+      if ($('#aGen', m)) $('#aGen', m).onclick = () => { $('#aPass', m).value = randomPassword(); };
       $('#aSave', m).onclick = () => {
         const name = $('#aName', m).value.trim();
         if (!name) return toast('Type the name.', 'error');
-        act('saveAdvisor', { id: adv?.id, name }, adv ? 'Advisor renamed' : 'Advisor added - set their sign-in on the Accounts page');
+        if (adv) return act('saveAdvisor', { id: adv.id, name }, 'Advisor renamed');
+        const email = $('#aEmail', m).value.trim(), password = $('#aPass', m).value;
+        if (password && !email) return toast('Add an email for this sign-in, or leave the password empty.', 'error');
+        act('saveAccount', { role: 'advisor', name, signName: name, title: 'Academic Advisor', clubId: $('#aClub', m).value, email, password: password || undefined },
+          email ? 'Advisor added with their sign-in' : 'Advisor added - set their sign-in on the Accounts page');
       };
     },
   });
