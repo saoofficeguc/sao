@@ -137,7 +137,7 @@ http.createServer(async (req, res) => {
     if (!res.headersSent) send(res, e.status || 500, { error: e.status ? e.message : 'Something went wrong on the server.' });
     if (!e.status) console.error(e);
   }
-}).listen(port, () => {
+}).listen(port, process.env.HOST || undefined, () => {
   console.log(`SAO Portal running at http://localhost:${port}`);
   console.log(`  Database: ${path.join(store.DATA_DIR, 'sao.db')}   PDF converter: ${converterName()}`);
   if (setup.needsSetup()) console.log('  First run: open the address above to create the SAO Office account.');

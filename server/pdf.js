@@ -17,8 +17,10 @@ function findSoffice() {
 const run = (cmd, args) => new Promise((resolve, reject) =>
   execFile(cmd, args, { timeout: 120000, windowsHide: true }, (err, stdout, stderr) => err ? reject(new Error(stderr || err.message)) : resolve(stdout)));
 
+// LibreOffice keeps its own profile here, so it works for a server account and never clashes with a desktop copy.
+const loProfile = require('url').pathToFileURL(path.join(workDir, 'lo-profile')).href;
 async function convertWithSoffice(soffice, docx) {
-  await run(soffice, ['--headless', '--convert-to', 'pdf', '--outdir', path.dirname(docx), docx]);
+  await run(soffice, [`-env:UserInstallation=${loProfile}`, '--headless', '--convert-to', 'pdf', '--outdir', path.dirname(docx), docx]);
   return docx.replace(/\.docx$/i, '.pdf');
 }
 async function convertWithWord(docx) {

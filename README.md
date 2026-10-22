@@ -89,6 +89,20 @@ The SAO Office manages sign-ins on the **Accounts** page:
 7. **AI memo drafting** (optional): set `ANTHROPIC_API_KEY` to a Claude API key. Without it,
    "Draft with AI" inserts a simple ready-made draft instead.
 
+### Quick setup on an Ubuntu 24.04 cloud server
+
+`deploy/setup.sh` does all of the above in one go: Node.js 22, LibreOffice and fonts, HTTPS with Caddy, a firewall,
+the app as a service that restarts by itself, and a daily backup to `/var/backups/sao-portal` (kept 14 days).
+Copy the project to `/opt/sao-portal` on the server, then run as root:
+
+```
+bash /opt/sao-portal/deploy/setup.sh                # free address: <server-ip>.sslip.io
+bash /opt/sao-portal/deploy/setup.sh sao.example.com  # or your own domain (point its DNS to the server first)
+```
+
+Data lives in `/var/lib/sao-portal`; settings such as `ANTHROPIC_API_KEY` go in `/etc/sao-portal.env`.
+To install a new version later: copy the new code over `/opt/sao-portal` and run `bash /opt/sao-portal/deploy/update.sh`.
+
 ### Settings (environment variables)
 
 | Variable | What it does | Default |
