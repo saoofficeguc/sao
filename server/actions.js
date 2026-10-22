@@ -94,6 +94,7 @@ const actions = {
   createRequest(user, b) {
     need(user.role === 'rep', 'Only club representatives submit requests.', 403);
     const club = activeClub(user.clubId);
+    need(club.advisorId, 'Your club has no Academic Advisor yet. Ask the SAO Office to assign one before sending papers.');
     const def = FORMS[b.type];
     need(def, 'Unknown form.');
     const input = b.data && typeof b.data === 'object' ? b.data : {};
@@ -257,17 +258,20 @@ const actions = {
     const club = b.id ? activeClub(String(b.id)) : null;
     need(!clubs.some(c => c.name.toLowerCase() === name.toLowerCase() && c.id !== club?.id), 'A club with that name already exists.');
     return store.tx(() => {
-      let advisorId = b.advisorId ? String(b.advisorId) : null;
-      if (advisorId === '__new' || !advisorId) {
+      // A club may have no advisor yet ("__none"); it cannot send papers until the SAO Office assigns one
+      let advisorId = b.advisorId && b.advisorId !== '__none' ? String(b.advisorId) : null;
+      if (advisorId === '__new') {
         const advName = text(b.newAdvisorName, 100);
         need(advName, "Type the new advisor's name.");
         advisorId = uid('adv');
         store.users.put({ id: advisorId, name: advName, role: 'advisor', title: 'Academic Advisor', signName: advName });
       }
-      const adv = store.users.get(advisorId);
-      need(adv && adv.role === 'advisor' && !adv.disabled, 'Choose an Academic Advisor.');
-      const taken = clubs.find(c => c.advisorId === advisorId && c.id !== club?.id);
-      need(!taken, `${adv.name} already advises ${taken?.name}.`);
+      if (advisorId) {
+        const adv = store.users.get(advisorId);
+        need(adv && adv.role === 'advisor' && !adv.disabled, 'Choose an Academic Advisor.');
+        const taken = clubs.find(c => c.advisorId === advisorId && c.id !== club?.id);
+        need(!taken, `${adv.name} already advises ${taken?.name}.`);
+      }
       const repName = text(b.repName, 100) || `${name} Rep`;
       let c = club;
       if (c) { c.name = name; c.advisorId = advisorId; }

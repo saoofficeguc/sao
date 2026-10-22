@@ -1,0 +1,20 @@
+# Visits the portal once a day. Free Supabase projects pause after a week with no activity;
+# this daily visit wakes the Render service, which loads its data from Supabase and keeps it active.
+# Set the address once: GitHub > repository > Settings > Secrets and variables > Actions > Variables > New: SAO_URL
+name: Keep the portal awake
+on:
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    if: ${{ vars.SAO_URL != '' }}
+    steps:
+      - name: Visit the portal (allows time for a cold start)
+        run: |
+          for i in 1 2 3 4 5 6; do
+            if curl -fsS --max-time 60 "${{ vars.SAO_URL }}/api/session" > /dev/null; then echo "Portal is up"; exit 0; fi
+            echo "Waiting for the portal to wake up..."; sleep 20
+          done
+          echo "The portal did not answer"; exit 1

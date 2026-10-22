@@ -36,4 +36,4 @@ function openFile(user, id) {
   return { path: p, name: row.name, type: row.type, size: row.size };
 }
 
-module.exports = { saveUpload, openFile, MAX_BYTES };
+module.exports = { saveUpload, openFile, MAX_BYTES, fileOnDisk };

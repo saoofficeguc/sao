@@ -19,6 +19,14 @@ DOMAIN="${1:-${IP//./-}.sslip.io}"
 echo "==> Setting up the SAO Portal at https://$DOMAIN"
 
 export DEBIAN_FRONTEND=noninteractive
+
+# Small servers (1 GB) get 2 GB of swap so PDF conversion never runs out of memory
+if [ ! -f /swapfile ] && [ "$(awk '/MemTotal/ {print $2}' /proc/meminfo)" -lt 3000000 ]; then
+  echo "==> Adding 2 GB swap"
+  fallocate -l 2G /swapfile && chmod 600 /swapfile && mkswap /swapfile >/dev/null && swapon /swapfile
+  grep -q '^/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' >> /etc/fstab
+fi
+
 echo "==> System packages, LibreOffice and fonts"
 apt-get update -y
 apt-get install -y curl ca-certificates gnupg ufw sqlite3 debian-keyring debian-archive-keyring apt-transport-https \

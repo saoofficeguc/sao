@@ -13,6 +13,7 @@ const setup = require('./server/setup');
 const files = require('./server/files');
 const { toPdf, converterName } = require('./server/pdf');
 const { draftMemo } = require('./server/ai');
+const cloud = require('./server/cloud');   // free Render hosting: keeps the data in Supabase (does nothing elsewhere)
 
 const root = __dirname;
 const port = Number(process.env.PORT) || 5173;
@@ -89,10 +90,12 @@ async function api(req, res, urlPath) {
     const buf = await readBody(req, files.MAX_BYTES + 1);
     const name = decodeURIComponent(req.headers['x-file-name'] || 'file');
     const out = files.saveUpload(user, name, String(req.headers['content-type'] || '').split(';')[0], buf);
+    if (out.status === 200) await cloud.putUpload(out.body.id, files.fileOnDisk(out.body.id), out.body.type);
     return send(res, out.status, out.body);
   }
   const f = urlPath.match(/^\/api\/files\/(file-[a-f0-9]+)$/);
   if (f && req.method === 'GET') {
+    await cloud.ensureUpload(f[1], files.fileOnDisk(f[1]));
     const file = files.openFile(user, f[1]);
     if (!file) return send(res, 404, { error: 'File not found.' });
     res.writeHead(200, { ...SECURITY_HEADERS, 'Content-Type': file.type, 'Content-Length': file.size, 'Cache-Control': 'private, no-store',
@@ -131,7 +134,10 @@ http.createServer(async (req, res) => {
   let urlPath;
   try { urlPath = decodeURIComponent(req.url.split('?')[0]); } catch { return send(res, 400, 'Bad request'); }
   try {
-    if (urlPath.startsWith('/api/')) return await api(req, res, urlPath);
+    if (urlPath.startsWith('/api/')) {
+      try { return await api(req, res, urlPath); }
+      finally { if (req.method === 'POST') cloud.scheduleSave(store.db); }   // every change happens in a POST
+    }
     return serveStatic(res, urlPath);
   } catch (e) {
     if (!res.headersSent) send(res, e.status || 500, { error: e.status ? e.message : 'Something went wrong on the server.' });
@@ -141,4 +147,13 @@ http.createServer(async (req, res) => {
   console.log(`SAO Portal running at http://localhost:${port}`);
   console.log(`  Database: ${path.join(store.DATA_DIR, 'sao.db')}   PDF converter: ${converterName()}`);
   if (setup.needsSetup()) console.log('  First run: open the address above to create the SAO Office account.');
+  if (cloud.enabled) console.log(`  Saving data to Supabase Storage (bucket "${cloud.BUCKET}")`);
 });
+
+// When the host stops the service (sleep, redeploy), save the latest data first
+for (const sig of ['SIGTERM', 'SIGINT']) {
+  process.on(sig, async () => {
+    try { await cloud.flush(store.db); } catch (e) { console.error(e.message); }
+    process.exit(0);
+  });
+}

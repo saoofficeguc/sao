@@ -103,6 +103,22 @@ bash /opt/sao-portal/deploy/setup.sh sao.example.com  # or your own domain (poin
 Data lives in `/var/lib/sao-portal`; settings such as `ANTHROPIC_API_KEY` go in `/etc/sao-portal.env`.
 To install a new version later: copy the new code over `/opt/sao-portal` and run `bash /opt/sao-portal/deploy/update.sh`.
 
+### Free hosting: Render + Supabase Storage (no card)
+
+Render runs the portal from this repository (`Dockerfile`, `render.yaml`; LibreOffice included for PDFs). Render's free
+disk is wiped when the service sleeps, so `server/cloud.js` keeps the database and uploaded files in a private
+Supabase Storage bucket (`sao-data`): it loads them on start (`start-cloud.js`), saves within ~2 seconds of every
+change, and keeps one dated backup per day (last 30) under `backups/`.
+
+1. Supabase: create a project, copy the Project URL and the secret (service role) key.
+2. Move existing data once: `set SUPABASE_URL=...`, `set SUPABASE_SERVICE_KEY=...`, then `node deploy/upload-to-supabase.js`.
+3. Render: New > Blueprint > this repository; enter the two Supabase values when asked.
+4. GitHub: add the repository variable `SAO_URL` (the Render address) so `.github/workflows/keep-awake.yml` visits the
+   site daily and Supabase never pauses.
+
+Free-plan limits: the site sleeps after 15 minutes without visitors (the next visit takes about a minute);
+only one copy may run at a time (deploy when nobody is using it).
+
 ### Settings (environment variables)
 
 | Variable | What it does | Default |

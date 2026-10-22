@@ -339,11 +339,39 @@ function openModal({ title, body, foot = '', wide = false, onMount }) {
 function closeModal() { $('#modal-root').innerHTML = ''; }
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 
+// ---------- Light / dark mode (each browser remembers its choice; "auto" follows the device) ----------
+const themePref = () => { try { return localStorage.getItem('sao-theme') || 'auto'; } catch (e) { return 'auto'; } };
+const isDark = () => document.documentElement.dataset.theme === 'dark';
+const darkQuery = window.matchMedia ? matchMedia('(prefers-color-scheme: dark)') : null;
+function applyTheme(pref = themePref()) {
+  const dark = pref === 'dark' || (pref === 'auto' && !!darkQuery?.matches);
+  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
+}
+function setTheme(pref) {
+  try { localStorage.setItem('sao-theme', pref); } catch (e) { /* this page only */ }
+  const was = isDark(); applyTheme(pref);
+  if (was !== isDark() && charts.length) render();   // redraw charts in the new colours
+}
+darkQuery?.addEventListener?.('change', () => { if (themePref() === 'auto') { const was = isDark(); applyTheme(); if (was !== isDark() && charts.length) render(); } });
+applyTheme();
+
 let charts = [];
+// On-screen charts in dark mode: black marks turn light and labels lighten. PDF charts (chartImage) always stay light.
+const DARK_SWAP = { '#121212': '#F2F2EE', '#3A3A3A': '#8A8A85', '#5C5C5C': '#A6A69F', '#BDBDB6': '#6E6E68', '#FFF4B3': '#8A7A2A', '#FDE3E4': '#8A4A4D', '#fff': '#1C1C1C' };
+function themed(cfg) {
+  if (!isDark()) return cfg;
+  const sw = v => Array.isArray(v) ? v.map(sw) : (typeof v === 'string' && DARK_SWAP[v]) || v;
+  const o = { ...(cfg.options || {}), color: '#C9C9C2' };
+  if (cfg.type === 'bar' || cfg.type === 'line') {
+    o.scales = { ...(o.scales || {}) };
+    for (const ax of ['x', 'y']) { const s = o.scales[ax] || {}; o.scales[ax] = { ...s, ticks: { ...(s.ticks || {}), color: '#A6A69F' }, grid: { ...(s.grid || {}), color: '#2E2E2E' } }; }
+  }
+  return { ...cfg, options: o, data: { ...cfg.data, datasets: cfg.data.datasets.map(d => ({ ...d, backgroundColor: sw(d.backgroundColor), borderColor: sw(d.borderColor) })) } };
+}
 function chart(canvas, cfg) {
   if (!canvas) return;
   if (!window.Chart) { canvas.parentElement.innerHTML = '<p class="muted">Charts need an internet connection to load.</p>'; return; }
-  charts.push(new Chart(canvas, cfg));
+  charts.push(new Chart(canvas, themed(cfg)));
 }
 function destroyCharts() { charts.forEach(c => c.destroy()); charts = []; }
 const moneyTooltip = { callbacks: { label: c => `${c.dataset.label || c.label}: ${money(c.parsed.y ?? c.parsed.x ?? c.parsed)}` } };
@@ -396,8 +424,42 @@ let financeSel = 'all';
 const PAGES = { accounts: pageAccounts, club: pageClub, clubs: pageClubs, home: pageHome, finance: pageFinance, paperwork: pagePaperwork, approvals: pageApprovals, announcements: pageAnnouncements, signature: pageSignature };
 const PAGE_TITLE = { accounts: 'Accounts', club: 'Club Profile', clubs: 'Clubs', home: 'Home', finance: 'Finance', paperwork: 'Paperwork', approvals: 'Approvals', announcements: 'Announcements', signature: 'My E-Signature' };
 
+// ---------- Icons (line icons on a 24px grid, drawn with the text colour) ----------
+const ICON_PATHS = {
+  home: 'M4 11l8-7 8 7v9h-5v-6h-6v6H4z',
+  approvals: 'M7 3h7l4 4v14H7z M14 3v4h4 M9.5 14.5l2 2 4-4.5',
+  paperwork: 'M7 3h7l4 4v14H7z M14 3v4h4 M10 12h5 M10 16h5',
+  finance: 'M3 7h18v12H3z M3 11h18 M16 15h2',
+  announcements: 'M4 10v4h3l6 4V6L7 10H4z M16.5 9a4 4 0 0 1 0 6 M19 6.5a7.5 7.5 0 0 1 0 11',
+  club: 'M6 21V4 M6 4h11l-2.5 4 2.5 4H6',
+  clubs: 'M9 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z M2.5 20c.5-3.5 3.2-5.5 6.5-5.5s6 2 6.5 5.5 M16 4.3a3.5 3.5 0 0 1 0 6.4 M18 14.8c2 .8 3.2 2.6 3.5 5.2',
+  accounts: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M4 21c1-4 4.5-6 8-6s7 2 8 6',
+  signature: 'M4 20h4L19 9l-4-4L4 16v4z M13.5 6.5l4 4',
+  more: 'M5 12h.01 M12 12h.01 M19 12h.01',
+  logout: 'M15 4h4v16h-4 M10 8l-4 4 4 4 M6 12h10',
+  lock: 'M6 11h12v9H6z M8.5 11V8a3.5 3.5 0 0 1 7 0v3',
+  plus: 'M12 5v14 M5 12h14',
+  bell: 'M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z M10 20.5h4',
+  report: 'M7 3h7l4 4v14H7z M14 3v4h4 M10 17v-2 M12.5 17v-4 M15 17v-3',
+  deposit: 'M12 4v10 M8 10l4 4 4-4 M4 19h16',
+  arrow: 'M5 12h14 M13 6l6 6-6 6',
+  menu: 'M4 7h16 M4 12h16 M4 17h16',
+  moon: 'M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z',
+  check: 'M5 12.5l4.5 4.5L19 7.5',
+};
+const icon = (name, cls = 'ic') => `<svg class="${cls}" viewBox="0 0 24 24" aria-hidden="true"><path d="${ICON_PATHS[name] || ICON_PATHS.more}"/></svg>`;
+// Short names for the phone tab bar, and which pages get a tab first (the rest go under "More")
+const TAB_LABEL = { paperwork: 'Papers', announcements: 'News', signature: 'Signature', club: 'Club', accounts: 'Accounts' };
+const TAB_FIRST = { rep: ['home', 'paperwork', 'finance', 'announcements'], sao: ['home', 'approvals', 'finance', 'paperwork'] };
+const initials = s => String(s || '?').replace(/^(Dr|Mr|Mrs|Ms|Prof)\.?\s+/i, '').split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0].toUpperCase()).join('');
+const avatar = u => u.role === 'rep' ? clubLogo(u.clubId, 'av') : `<span class="avatar">${esc(initials(u.name))}</span>`;
+const whoName = u => u.role === 'rep' ? clubName(u.clubId) : u.name;
+const whoRole = u => u.role === 'rep' ? 'Club Representative' : (u.title || ROLE_LABEL[u.role]);
+
+async function signOut() { try { await apiPost('/api/logout'); } catch (e) { /* signed out anyway */ } state = null; location.hash = ''; boot(); }
+
 function render() {
-  destroyCharts(); clearInterval(bannerTimer); clearTimeout(bannerTimer);
+  destroyCharts(); clearInterval(bannerTimer); clearTimeout(bannerTimer); closeSheet();
   if (!state) return;
   const u = me();
   if (!u) { boot(); return; }
@@ -408,15 +470,70 @@ function render() {
     approvals: pendingForMe(u).length,
     announcements: u.role === 'sao' ? state.announcements.filter(a => a.status === 'pending').length : 0,
   };
-  $('#app').innerHTML = `${brandHeader(u)}<div class="layout">
-    <aside class="sidebar">
-      <nav class="nav">${NAV[u.role].map(([k, label]) => `<a href="#${k}" class="${k === page ? 'active' : ''}">${label}${counts[k] ? `<span class="count">${counts[k]}</span>` : ''}</a>`).join('')}</nav>
+  const items = NAV[u.role].map(([k, label]) => ({ k, label, count: counts[k] || 0 }));
+  const first = TAB_FIRST[u.role] || items.map(i => i.k);
+  const tabs = first.map(k => items.find(i => i.k === k)).filter(Boolean).slice(0, 4);
+  const rest = items.filter(i => !tabs.includes(i));
+  const badge = n => n ? `<span class="count">${n}</span>` : '';
+  const closed = sidebarClosed();
+  $('#app').innerHTML = `${brandHeader(u, counts, closed)}<div class="layout${closed ? ' side-closed' : ''}">
+    <aside class="sidebar" id="sidebar">
+      <nav class="nav" aria-label="Main">${items.map(i => `<a href="#${i.k}" class="${i.k === page ? 'active' : ''}" title="${i.label}"${i.k === page ? ' aria-current="page"' : ''}>${icon(i.k)}<span class="lbl">${i.label}</span>${badge(i.count)}</a>`).join('')}</nav>
+      <div class="side-user">${avatar(u)}<div class="who"><b>${esc(whoName(u))}</b><span>${esc(whoRole(u))}</span></div>
+        <button class="icon-btn" data-act="password" title="Change password" aria-label="Change password">${icon('lock')}</button>
+        <button class="icon-btn" data-act="logout" title="Sign out" aria-label="Sign out">${icon('logout')}</button></div>
       ${state.demo ? '<div class="side-foot"><span class="badge amber">Demo data</span></div>' : ''}
     </aside>
-    <div class="main-col"><main class="main" id="main"></main>${GUC_FOOT}</div></div>`;
-  $('#logout').onclick = async () => { try { await apiPost('/api/logout'); } catch (e) { /* signed out anyway */ } state = null; location.hash = ''; boot(); };
-  $('#chgPass').onclick = () => passwordModal();
+    <div class="main-col"><main class="main" id="main"></main>${GUC_FOOT}</div></div>
+    <nav class="tabbar" aria-label="Main">${tabs.map(i => `<a href="#${i.k}" class="tab ${i.k === page ? 'active' : ''}"${i.k === page ? ' aria-current="page"' : ''}><span class="tab-ic">${icon(i.k)}${i.count ? `<i class="tab-badge">${i.count}</i>` : ''}</span><span class="tab-lbl">${TAB_LABEL[i.k] || i.label}</span></a>`).join('')}
+      <button type="button" class="tab ${rest.some(i => i.k === page) ? 'active' : ''}" data-act="more"><span class="tab-ic">${icon('more')}${rest.some(i => i.count) ? '<i class="tab-dot"></i>' : ''}</span><span class="tab-lbl">More</span></button></nav>`;
+  $$('[data-act="logout"]').forEach(b => b.onclick = signOut);
+  $$('[data-act="password"]').forEach(b => b.onclick = () => passwordModal());
+  $$('[data-act="more"]').forEach(b => b.onclick = () => openSheet(u, rest, page, 'More'));
+  // The account button (top right) holds only the person's own things: e-signature, password, sign out
+  $$('[data-act="account"]').forEach(b => b.onclick = () => openSheet(u, items.filter(i => i.k === 'signature'), page, 'Account'));
+  $$('[data-act="side"]').forEach(b => b.onclick = () => toggleSidebar(b));
   PAGES[page]($('#main'), u);
+}
+
+// The left menu can be closed to a slim icon bar; each browser remembers the choice
+function sidebarClosed() { try { return localStorage.getItem('sao-sidebar') === 'closed'; } catch (e) { return false; } }
+function toggleSidebar(btn) {
+  const layout = $('.layout');
+  const closed = layout.classList.toggle('side-closed');
+  try { localStorage.setItem('sao-sidebar', closed ? 'closed' : 'open'); } catch (e) { /* remembered for this page only */ }
+  btn.setAttribute('aria-expanded', String(!closed));
+  btn.title = closed ? 'Open menu' : 'Close menu';
+  btn.setAttribute('aria-label', btn.title);
+}
+
+// A menu sheet: from the account button, or the "More" tab on phones (pages without a tab).
+// Both end with Change password and Sign out.
+function closeSheet() { const s = $('#sheet'); if (s) s.remove(); document.removeEventListener('keydown', sheetKey); }
+function sheetKey(e) { if (e.key === 'Escape') closeSheet(); }
+function openSheet(u, rest, page, label = 'Menu') {
+  closeSheet();
+  const el = document.createElement('div');
+  el.id = 'sheet'; el.className = 'sheet-backdrop' + (label === 'Account' ? ' account' : '');
+  el.innerHTML = `<div class="sheet" role="dialog" aria-modal="true" aria-label="${label}">
+    <div class="sheet-handle"></div>
+    <div class="sheet-user">${avatar(u)}<div class="who"><b>${esc(whoName(u))}</b><span>${esc(whoRole(u))}</span></div></div>
+    ${rest.map(i => `<a class="sheet-row ${i.k === page ? 'active' : ''}" href="#${i.k}">${icon(i.k)}<span>${i.label}</span>${i.count ? `<span class="count">${i.count}</span>` : icon('arrow', 'ic chev')}</a>`).join('')}
+    ${rest.length ? '<div class="sheet-sep"></div>' : ''}
+    <div class="theme-row">${icon('moon')}<span>Appearance</span><div class="seg" role="group" aria-label="Appearance">${[['light', 'Light'], ['dark', 'Dark'], ['auto', 'Auto']].map(([k, l]) => `<button type="button" data-theme-pick="${k}" aria-pressed="${themePref() === k}" title="${k === 'auto' ? 'Follow this device' : l + ' mode'}">${l}</button>`).join('')}</div></div>
+    <button type="button" class="sheet-row" data-sheet="password">${icon('lock')}<span>Change password</span></button>
+    <button type="button" class="sheet-row danger" data-sheet="logout">${icon('logout')}<span>Sign out</span></button>
+  </div>`;
+  document.body.appendChild(el);
+  el.onclick = e => { if (e.target === el || e.target.closest('a.sheet-row')) closeSheet(); };
+  $$('[data-theme-pick]', el).forEach(b => b.onclick = () => {
+    $$('[data-theme-pick]', el).forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    setTheme(b.dataset.themePick);
+  });
+  $('[data-sheet="password"]', el).onclick = () => { closeSheet(); passwordModal(); };
+  $('[data-sheet="logout"]', el).onclick = () => { closeSheet(); signOut(); };
+  document.addEventListener('keydown', sheetKey);
+  requestAnimationFrame(() => el.classList.add('open'));
 }
 window.addEventListener('hashchange', render);
 
@@ -637,31 +754,17 @@ async function aiDraftMemo(m, ctx) {
 }
 const saoChecks = r => (FORMS[r.type].saoChecks || []).filter(c => c.when(r.data || {}));
 
-// Students' status window: where each of their requests is right now
-function statusWindowHTML(list) {
-  const stepText = r => {
-    if (r.status === 'completed') return { pct: 100, text: 'Fully approved', cls: 'done' };
-    if (r.status === 'rejected') return { pct: 100, text: `Rejected by ${STAGE_LABEL[r.rejection?.stage] || ''} - open it to see why`, cls: 'rejected' };
-    const order = stagesFor(r), i = order.indexOf(r.status);
-    return { pct: Math.round(i / order.length * 100), text: `Step ${i + 1} of ${order.length}: waiting for ${STAGE_LABEL[r.status]}`, cls: 'progress' };
-  };
-  return `<div class="card"><div class="page-head" style="margin-bottom:8px"><h2>My requests - status</h2><a class="btn sm" href="#paperwork">New request</a></div>
-    ${!list.length ? '<div class="empty">No requests yet. Create your first one from the Paperwork tab.</div>' : `<div class="status-list">${list.map(r => { const st = stepText(r); return `
-      <div class="status-row clickable" data-req="${r.id}">
-        <div class="status-main"><b>${esc(r.title)}</b>${lateBadge(r)}<div class="small muted">${r.id} &middot; ${esc(formName(r.type))} &middot; submitted ${fmtDate(r.createdAt)}</div></div>
-        <div class="status-side"><div class="small ${st.cls === 'rejected' ? 'neg' : st.cls === 'done' ? 'pos' : ''}">${esc(st.text)}</div>
-          <div class="bar ${st.cls}"><span style="width:${st.pct}%"></span></div></div>
-      </div>`; }).join('')}</div>`}</div>`;
-}
-
 // ---------- Brand header & club logos ----------
-function brandHeader(u) {
+function brandHeader(u, counts = {}, closed = false) {
+  // The bell leads to whatever is waiting for this person
+  const waiting = (counts.approvals || 0) + (counts.announcements || 0);
+  const bellHref = counts.approvals ? '#approvals' : counts.announcements ? '#announcements' : '#home';
   return `<header class="topbar"><div class="topbar-inner">
+      <button type="button" class="icon-btn menu-btn" data-act="side" aria-controls="sidebar" aria-expanded="${!closed}" title="${closed ? 'Open menu' : 'Close menu'}" aria-label="${closed ? 'Open menu' : 'Close menu'}">${icon('menu')}</button>
       <a class="sao-brand" href="#home" aria-label="SAO home">${SAO_MARK}<div class="sao-title"><b>SAO</b><span>Student Activities Office</span></div></a>
       <div class="spacer"></div>
-      <div class="user-chip">${u.role === 'rep' ? clubLogo(u.clubId, 'md') : ''}
-        <div class="who"><b>${esc(u.role === 'rep' ? clubName(u.clubId) : u.name)}</b><span>${esc(u.role === 'rep' ? 'Club Representative' : u.title)}</span></div>
-        <button class="btn" id="chgPass" title="Change your password">Password</button><button class="btn" id="logout">Sign out</button></div>
+      <a class="icon-btn bell" href="${bellHref}" title="${waiting ? waiting + ' waiting for you' : 'Nothing waiting'}" aria-label="${waiting ? waiting + ' items waiting for you' : 'Nothing waiting for you'}">${icon('bell')}${waiting ? `<i class="tab-badge">${waiting}</i>` : ''}</a>
+      <button type="button" class="user-chip" data-act="account" aria-label="Account menu">${avatar(u)}<span class="who"><b>${esc(whoName(u))}</b><span>${esc(whoRole(u))}</span></span></button>
     </div><div class="tricolor"></div></header>`;
 }
 const LOGO_COLORS = ['#e31e24', '#1c1917', '#b8161b', '#a16207', '#57534e', '#7f1d1d'];
@@ -711,7 +814,7 @@ function pageClub(el, u) {
   el.innerHTML = `<div class="page-head"><div><h1>Club Profile</h1><p class="muted">Your club's logo appears on the sign-in screen, the announcement banner and your requests.</p></div></div>
     <div class="card"><div class="logo-upload">${clubLogo(c.id, 'lg')}
       <div><h2 style="margin-bottom:4px">${esc(c.name)}</h2>
-        <div class="small muted" style="margin-bottom:10px">Academic Advisor: ${esc(userById(c.advisorId)?.name || '-')}</div>
+        <div class="small muted" style="margin-bottom:10px">Academic Advisor: ${esc(userById(c.advisorId)?.name || 'not assigned yet - the SAO Office will add one')}</div>
         <div class="actions"><label class="btn primary" for="logoFile">${c.logo ? 'Change logo' : 'Upload logo'}</label>
           <input id="logoFile" type="file" accept="image/png,image/jpeg,image/svg+xml" class="hidden">
           ${c.logo ? '<button class="btn" id="logoRemove">Remove</button>' : ''}</div>
@@ -725,9 +828,11 @@ const advisorClub = advisorId => activeClubs().find(c => c.advisorId === advisor
 const freeAdvisors = (exceptClubId) => state.users.filter(x => x.role === 'advisor' && !x.disabled && (!advisorClub(x.id) || advisorClub(x.id).id === exceptClubId));
 function advisorPicker(id, currentId, exceptClubId) {
   const free = freeAdvisors(exceptClubId);
+  const none = !currentId && (exceptClubId || !free.length);
   return `<select id="${id}">${free.map(a => `<option value="${a.id}" ${a.id === currentId ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}
-    <option value="__new" ${!free.length ? 'selected' : ''}>+ New advisor...</option></select>
-    <input id="${id}New" class="${free.length ? 'hidden' : ''}" placeholder="New advisor's full name, e.g. Dr. Nour Adel" style="margin-top:6px">`;
+    <option value="__none" ${none ? 'selected' : ''}>No advisor yet</option>
+    <option value="__new">+ New advisor...</option></select>
+    <input id="${id}New" class="hidden" placeholder="New advisor's full name, e.g. Dr. Nour Adel" style="margin-top:6px">`;
 }
 function bindAdvisorPicker(m, id) {
   const sel = $('#' + id, m), inp = $('#' + id + 'New', m);
@@ -745,9 +850,9 @@ function pageClubs(el) {
       <div class="actions"><button class="btn primary" id="addClub">+ Add club</button></div></div>
     <div class="clubs-grid">${clubs.map(c => {
       const rep = state.users.find(x => x.role === 'rep' && x.clubId === c.id && !x.disabled);
-      return `<div class="card club-card">${clubLogo(c.id, 'md')}
+      return `<div class="card club-card">${clubLogo(c.id, 'lg2')}
       <div class="info"><b>${esc(c.name)}</b>
-        <div class="small muted">Advisor: ${esc(userById(c.advisorId)?.name || 'none')}</div>
+        <div class="small muted">Advisor: ${c.advisorId ? esc(userById(c.advisorId)?.name || '-') : '<span class="badge amber">No advisor yet</span>'}</div>
         <div class="small muted">Rep: ${esc(rep?.name || '-')} &middot; Balance ${moneyShort(clubFinance(c.id).balance)}</div>
         <div class="actions"><button class="btn sm" data-edit-club="${c.id}">Edit</button>
           <label class="btn sm" for="lf-${c.id}">${c.logo ? 'Logo' : 'Add logo'}</label>
@@ -910,35 +1015,96 @@ function requestTable(list, opts = {}) {
 }
 function bindRequestRows(el) { $$('[data-req]', el).forEach(tr => tr.onclick = () => openRequest(tr.dataset.req)); }
 
+// A request as a row: form icon, title, form and date, then a status chip and the step it is at
+function requestRowsHTML(list, opts = {}) {
+  if (!list.length) return `<div class="empty-state">${icon(opts.emptyIcon || 'check', 'ic big')}<b>${esc(opts.emptyTitle || 'Nothing here yet')}</b><span>${esc(opts.empty || '')}</span></div>`;
+  const step = r => {
+    if (r.status === 'completed' || r.status === 'rejected') return '';
+    const order = stagesFor(r), i = order.indexOf(r.status);
+    return `<span class="steps" aria-label="Step ${i + 1} of ${order.length}">${order.map((_, j) => `<i class="${j < i ? 'done' : j === i ? 'now' : ''}"></i>`).join('')}</span>`;
+  };
+  return `<div class="req-list">${list.map(r => `<button type="button" class="req-row" data-req="${r.id}">
+      <span class="req-ic ${r.status === 'completed' ? 'done' : r.status === 'rejected' ? 'back' : ''}">${icon(r.status === 'completed' ? 'approvals' : 'paperwork')}</span>
+      <span class="req-main"><b>${esc(r.title)}</b><span>${opts.showClub ? esc(clubName(r.clubId)) + ' &middot; ' : ''}${esc(formName(r.type))} &middot; ${fmtDate(r.createdAt)}${r.late ? ' &middot; <em class="late">Late</em>' : ''}</span></span>
+      <span class="req-side">${statusBadge(r)}${step(r)}</span>
+    </button>`).join('')}</div>`;
+}
+const tile = (href, ic, title, sub, attrs = '') => `<a class="tile" href="${href}"${attrs}>${icon(ic)}<span><b>${title}</b>${sub ? `<small>${sub}</small>` : ''}</span></a>`;
+const BARS = '<span class="mini-bars" aria-hidden="true"><i></i><i></i><i></i></span>';
+
 function pageHome(el, u) {
+  const greet = `<div class="home-head"><div><p>${u.role === 'rep' ? 'Signed in as the representative of' : 'Signed in as'}</p><h1>${esc(whoName(u))}</h1>${u.role === 'rep' ? '' : `<p>${esc(whoRole(u))}</p>`}</div>${u.role === 'rep' ? clubLogo(u.clubId, 'lg2') : ''}</div>`;
   let body = '';
   if (u.role === 'rep') {
     const s = clubFinance(u.clubId);
-    const mine = visibleRequests(u);
-    body = `<div class="grid kpis">
-      <div class="card kpi accent"><div class="label">Bank balance</div><div class="value">${money(s.balance)}</div><div class="sub">${esc(clubName(u.clubId))}</div></div>
-      <div class="card kpi"><div class="label">Money in ${thisYear()}</div><div class="value">${moneyShort(s.y.gross)}</div><div class="sub">before 14% tax</div></div>
-      <div class="card kpi"><div class="label">Requests in progress</div><div class="value">${mine.filter(inProgress).length}</div><div class="sub">${mine.filter(r => r.status === 'completed').length} fully approved</div></div>
-      ${(() => { const li = lateInfo(u.clubId); return `<div class="card kpi ${li.blockedUntil ? 'kpi-red' : ''}"><div class="label">Late submissions</div><div class="value">${li.used} / ${LATE_LIMIT}</div><div class="sub">${li.blockedUntil ? 'Late requests blocked until ' + fmtDate(li.blockedUntil) : `${li.left} left before a ${LATE_BLOCK_MONTHS}-month block`}</div></div>`; })()}
-      <div class="card kpi"><div class="label">My announcements</div><div class="value">${state.announcements.filter(a => a.clubId === u.clubId && a.status === 'pending').length}</div><div class="sub">waiting for SAO review</div></div>
-    </div>
-    ${statusWindowHTML(mine)}`;
+    const mine = visibleRequests(u).slice().sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+    const li = lateInfo(u.clubId);
+    const annPending = state.announcements.filter(a => a.clubId === u.clubId && a.status === 'pending').length;
+    body = `<div class="home-grid">
+      <div class="home-col">
+        <section class="money-card">
+          <div class="mc-top"><span class="mc-label">Club balance</span>${BARS}</div>
+          <div class="mc-amount">${money(s.balance)}</div>
+          <div class="mc-sub">${moneyShort(s.y.gross)} received in ${thisYear()} &middot; before 14% tax</div>
+          <div class="mc-actions"><button type="button" class="btn key" id="hNewReq">${icon('plus')} New request</button><a class="btn ghost-light" href="#finance">${icon('finance')} Finance</a></div>
+        </section>
+        <div class="tiles">
+          ${tile('#finance', 'report', 'Statement', 'PDF or Excel', ' id="hStatement"')}
+          ${tile('#announcements', 'announcements', 'Announce', annPending ? `${annPending} waiting for SAO` : 'Post club news')}
+          ${tile('#club', 'club', 'Club profile', 'Logo and details')}
+          ${tile('#signature', 'signature', 'E-signature', 'Draw it once')}
+        </div>
+        <section class="card late-meter ${li.blockedUntil ? 'blocked' : ''}">
+          <div><b>Late submissions</b><span>${li.blockedUntil ? `Late requests blocked until ${fmtDate(li.blockedUntil)}` : `${li.left} of ${LATE_LIMIT} left before a ${LATE_BLOCK_MONTHS}-month block`}</span></div>
+          <span class="dots" aria-label="${li.used} of ${LATE_LIMIT} used">${Array.from({ length: LATE_LIMIT }, (_, i) => `<i class="${i < li.used ? 'used' : ''}"></i>`).join('')}</span>
+        </section>
+      </div>
+      <section class="card list-card">
+        <div class="list-head"><h2>Your requests</h2><a href="#paperwork">See all</a></div>
+        ${requestRowsHTML(mine.slice(0, 6), { emptyIcon: 'paperwork', emptyTitle: 'No requests yet', empty: 'Tap New request to send your first form.' })}
+      </section>
+    </div>`;
   } else {
     const pending = pendingForMe(u);
     const vis = visibleRequests(u);
-    if (isSigner(u)) body = `<div class="grid kpis"><div class="card kpi accent"><div class="label">Waiting for my signature</div><div class="value">${pending.length}</div><div class="sub">as ${STAGE_LABEL[u.role]}</div></div></div>
-      <div class="card"><div class="page-head" style="margin-bottom:8px"><h2>Waiting for your signature</h2><a class="btn sm" href="#approvals">Open approvals</a></div>${requestTable(pending, { empty: 'Nothing is waiting for your signature.' })}</div>`;
-    else body = `<div class="grid kpis">
-      <div class="card kpi accent"><div class="label">Waiting for my signature</div><div class="value">${pending.length}</div><div class="sub">as ${STAGE_LABEL[u.role]}</div></div>
-      <div class="card kpi"><div class="label">In progress</div><div class="value">${vis.filter(inProgress).length}</div><div class="sub">${u.role === 'clinic' ? 'food & beverages agreements' : `across ${visibleClubs(u).filter(c => !c.archived).length} clubs`}</div></div>
-      <div class="card kpi"><div class="label">Fully approved</div><div class="value">${vis.filter(r => r.status === 'completed').length}</div><div class="sub">signed PDFs with SAO</div></div>
-      ${u.role === 'sao' ? `<div class="card kpi"><div class="label">Announcements to review</div><div class="value">${state.announcements.filter(a => a.status === 'pending').length}</div><div class="sub"><a href="#announcements">Review now</a></div></div>` : ''}
-    </div>
-    <div class="card"><div class="page-head" style="margin-bottom:8px"><h2>Waiting for you</h2><a class="btn sm" href="#approvals">Open approvals</a></div>${requestTable(pending.slice(0, 6), { empty: 'You are all caught up.' })}</div>
-    ${u.role === 'sao' ? lateOverviewHTML() : ''}`;
+    const annPending = u.role === 'sao' ? state.announcements.filter(a => a.status === 'pending').length : 0;
+    const card = `<section class="money-card">
+        <div class="mc-top"><span class="mc-label">Waiting for your signature</span>${BARS}</div>
+        <div class="mc-amount">${pending.length}</div>
+        <div class="mc-sub">${pending.length ? `as ${esc(STAGE_LABEL[u.role])}` : 'You are all caught up.'}</div>
+        <div class="mc-actions">${pending.length ? `<button type="button" class="btn key" id="hReview">${icon('signature')} Review &amp; sign</button>` : ''}<a class="btn ghost-light" href="#approvals">${icon('approvals')} All approvals</a></div>
+      </section>`;
+    const stats = u.role === 'sao' ? `<div class="stat-row">
+        <a class="stat" href="#paperwork"><b>${vis.filter(inProgress).length}</b><span>In progress</span></a>
+        <a class="stat" href="#paperwork"><b>${vis.filter(r => r.status === 'completed').length}</b><span>Fully approved</span></a>
+        <a class="stat ${annPending ? 'attn' : ''}" href="#announcements"><b>${annPending}</b><span>News to review</span></a>
+        <a class="stat" href="#clubs"><b>${activeClubs().length}</b><span>Clubs</span></a>
+      </div>
+      <div class="tiles">
+        ${tile('#finance', 'finance', 'Finance', 'All club accounts')}
+        ${tile('#clubs', 'clubs', 'Clubs', 'Clubs and advisors')}
+        ${tile('#accounts', 'accounts', 'Accounts', 'Sign-ins')}
+        ${tile('#announcements', 'announcements', 'News', annPending ? `${annPending} to review` : 'Banner')}
+      </div>` : `<div class="tiles">
+        ${tile('#approvals', 'approvals', 'Approvals', 'Everything waiting')}
+        ${tile('#signature', 'signature', 'E-signature', 'Draw it once')}
+      </div>`;
+    body = `<div class="home-grid">
+      <div class="home-col">${card}${stats}</div>
+      <div class="home-col">
+        <section class="card list-card">
+          <div class="list-head"><h2>Waiting for you</h2><a href="#approvals">See all</a></div>
+          ${requestRowsHTML(pending.slice(0, 6), { showClub: true, emptyTitle: 'All caught up', empty: 'Nothing is waiting for your signature.' })}
+        </section>
+        ${u.role === 'sao' ? lateOverviewHTML() : ''}
+      </div>
+    </div>`;
   }
-  el.innerHTML = `${bannerHTML()}<div class="page-head"><div style="display:flex;gap:14px;align-items:center">${u.role === 'rep' ? clubLogo(u.clubId, 'md') : ''}<div><h1>Welcome, ${esc(u.role === 'rep' ? clubName(u.clubId) : u.name)}</h1><p class="muted">${esc(ROLE_LABEL[u.role])}</p></div></div></div>${body}`;
+  el.innerHTML = `${greet}${bannerHTML()}${body}`;
   bindRequestRows(el);
+  if ($('#hNewReq', el)) $('#hNewReq', el).onclick = () => pickFormModal(u);
+  if ($('#hStatement', el)) $('#hStatement', el).onclick = e => { e.preventDefault(); statementModal(u, u.clubId); };
+  if ($('#hReview', el)) $('#hReview', el).onclick = () => openRequest(pendingForMe(u)[0].id);
   startBanner();
 }
 
@@ -1495,6 +1661,7 @@ function pagePaperwork(el, u) {
 
 // ----- Form picker -----
 function pickFormModal(u) {
+  if (!clubById(u.clubId)?.advisorId) return toast('Your club has no Academic Advisor yet. Ask the SAO Office to assign one before sending papers.', 'error');
   openModal({
     wide: true,
     title: `<h2>New request</h2><div class="muted small">Choose the official form. It goes to your Academic Advisor, then the SAO Office Head, then the Vice President.</div>`,
