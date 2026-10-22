@@ -7,9 +7,9 @@ const ok = (cond, label) => { console.log(`${cond ? 'PASS' : 'FAIL'}  ${label}`)
 
 async function session(email, password = PASS) {
   const res = await fetch(BASE + '/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-SAO': '1' }, body: JSON.stringify({ email, password }) });
-  const cookie = (res.headers.get('set-cookie') || '').split(';')[0];
+  const token = res.ok ? (await res.json()).token : '';
   const call = async (method, path, body, extra = {}) => {
-    const r = await fetch(BASE + path, { method, headers: { Cookie: cookie, 'Content-Type': 'application/json', 'X-SAO': '1', ...extra }, body: body ? JSON.stringify(body) : undefined });
+    const r = await fetch(BASE + path, { method, headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json', 'X-SAO': '1', ...extra }, body: body ? JSON.stringify(body) : undefined });
     let data = null; try { data = await r.json(); } catch { /* not json */ }
     return { status: r.status, data };
   };
@@ -42,7 +42,7 @@ async function session(email, password = PASS) {
   ok(fakeTax.status === 400, 'Rep cannot avoid tax by calling it a university allocation');
 
   // file upload + access
-  const up = await fetch(BASE + '/api/files', { method: 'POST', headers: { Cookie: '', 'Content-Type': 'application/pdf', 'X-SAO': '1' }, body: Buffer.from('%PDF-1.4 test') });
+  const up = await fetch(BASE + '/api/files', { method: 'POST', headers: { 'Content-Type': 'application/pdf', 'X-SAO': '1' }, body: Buffer.from('%PDF-1.4 test') });
   ok(up.status === 401, 'Uploading without signing in is refused');
 
   // ---- another club's rep ----
@@ -71,7 +71,7 @@ async function session(email, password = PASS) {
   // ---- signed out ----
   const anon = await fetch(BASE + '/api/state');
   ok(anon.status === 401, 'Nothing is visible without signing in');
-  for (const p of ['/server.js', '/server/db.js', '/data/sao.db', '/.gitignore', '/package.json']) {
+  for (const p of ['/server.js', '/supabase/functions/_shared/core/app.mjs', '/supabase/functions/sao/index.ts', '/data/sao.db', '/.gitignore', '/package.json']) {
     ok((await fetch(BASE + p)).status === 404, `${p} cannot be downloaded`);
   }
   console.log(failures ? `\n${failures} check(s) FAILED` : '\nAll checks passed');

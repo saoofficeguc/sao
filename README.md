@@ -24,7 +24,7 @@ stop the server and delete `data/`.
 
 | Account | Can see and do |
 |---|---|
-| SAO Office (main account) | Everything: every club's bank account, all paperwork and its status, announcements, approvals, final signed PDFs, clubs, advisors and accounts. Signs as Youth Welfare Director (Mr. Yehia Al-Razaz) |
+| SAO Office (main account) | Everything: every club's bank account, all paperwork and its status, announcements, approvals, final signed forms, clubs, advisors and accounts. Signs as Youth Welfare Director (Mr. Yehia Al-Razaz) |
 | Vice President (Dr. Ehab Abo El-Kheir) | Only the papers waiting for his signature |
 | Academic Advisors (one per club) | Only the papers from their club waiting for their signature |
 | GUC Clinic | Only Food & Beverages Sponsorship Agreements waiting for its signature (it signs first) |
@@ -59,7 +59,7 @@ The SAO Office manages sign-ins on the **Accounts** page:
   - Sponsorship: Sponsorship Agreement, Food & Beverages Sponsorship Agreement (Clinic signs first)
   - Finance: Expense Approval with a **memo** ("Draft with AI" helps), printed on `templates/memo.docx`.
     When the Vice President approves, the amount is taken from the club account automatically.
-  - Chain: Club Rep -> (Clinic) -> Academic Advisor -> SAO Office Head -> Vice President -> signed PDF back to SAO Office.
+  - Chain: Club Rep -> (Clinic) -> Academic Advisor -> SAO Office Head -> Vice President -> signed form back to SAO Office.
     Any signer can reject with a comment; the club can resubmit.
   - Late-submission rules (10 working days, 4 lates then a 2-month block) and required attachments are checked on the server.
 - **Downloads** are the original Word forms, filled in. Final approvals are PDFs (memo + form for expenses).
@@ -78,15 +78,13 @@ The SAO Office manages sign-ins on the **Accounts** page:
    or a small Linux VPS). Copy the project folder there (without `data/` and `node_modules/`) and run `npm install`.
 2. **Finish setup straight away**: until the SAO Office account exists, *anyone* who opens the site can create it.
    Open the site and create the account right after starting the server for the first time.
-3. **PDFs**: install [LibreOffice](https://www.libreoffice.org/) on the server. It is found automatically
-   (or set `SAO_SOFFICE` to the path of `soffice`). Without LibreOffice, Windows servers fall back to Microsoft Word.
-4. **HTTPS**: put the app behind a web server with a certificate (IIS, nginx, Caddy, or your hosting
-   provider's HTTPS), then start it with `SAO_SECURE_COOKIES=1` so sign-in cookies are only sent over HTTPS.
-5. **Keep it running**: run it as a service so it restarts after a reboot, for example with
+3. **HTTPS**: put the app behind a web server with a certificate (IIS, nginx, Caddy, or your hosting
+   provider's HTTPS) so passwords and sign-in tokens only travel encrypted.
+4. **Keep it running**: run it as a service so it restarts after a reboot, for example with
    [pm2](https://pm2.keymetrics.io/) (`pm2 start server.js --name sao` then `pm2 save`) or a Windows service.
-6. **Backups**: copy the whole `data/` folder every day (stop the server first, or copy `sao.db` with
+5. **Backups**: copy the whole `data/` folder every day (stop the server first, or copy `sao.db` with
    `sqlite3 sao.db ".backup backup.db"`). That folder is the entire system: accounts, money, paperwork and files.
-7. **AI memo drafting** (optional): set `ANTHROPIC_API_KEY` to a Claude API key. Without it,
+6. **AI memo drafting** (optional): set `ANTHROPIC_API_KEY` to a Claude API key. Without it,
    "Draft with AI" inserts a simple ready-made draft instead.
 
 ### Quick setup on an Ubuntu 24.04 cloud server
@@ -103,21 +101,28 @@ bash /opt/sao-portal/deploy/setup.sh sao.example.com  # or your own domain (poin
 Data lives in `/var/lib/sao-portal`; settings such as `ANTHROPIC_API_KEY` go in `/etc/sao-portal.env`.
 To install a new version later: copy the new code over `/opt/sao-portal` and run `bash /opt/sao-portal/deploy/update.sh`.
 
-### Free hosting: Render + Supabase Storage (no card)
+### Free hosting: GitHub Pages + Supabase (no card)
 
-Render runs the portal from this repository (`Dockerfile`, `render.yaml`; LibreOffice included for PDFs). Render's free
-disk is wiped when the service sleeps, so `server/cloud.js` keeps the database and uploaded files in a private
-Supabase Storage bucket (`sao-data`): it loads them on start (`start-cloud.js`), saves within ~2 seconds of every
-change, and keeps one dated backup per day (last 30) under `backups/`.
+- **Pages** (index.html, app.js, ...) are published on GitHub Pages by `.github/workflows/deploy-pages.yml`.
+- **The server** is the Supabase Edge Function `sao` (`supabase/functions/sao/index.ts`), deployed by
+  `.github/workflows/deploy-supabase.yml`. It runs the same code as `node server.js` (`supabase/functions/_shared/core`),
+  with Supabase's Postgres database (tables locked with row level security, so only the function can use them)
+  and a private Storage bucket (`sao-data`) for attached files.
+- `config.js` tells the pages where the server is (the Supabase function when the site runs on github.io).
+- Sign-in uses a token sent with each request (`Authorization: Bearer ...`), not a cookie.
+- Final approvals download as the filled Word form with all signatures; save it as PDF in Word.
 
-1. Supabase: create a project, copy the Project URL and the secret (service role) key.
-2. Move existing data once: `set SUPABASE_URL=...`, `set SUPABASE_SERVICE_KEY=...`, then `node deploy/upload-to-supabase.js`.
-3. Render: New > Blueprint > this repository; enter the two Supabase values when asked.
-4. GitHub: add the repository variable `SAO_URL` (the Render address) so `.github/workflows/keep-awake.yml` visits the
-   site daily and Supabase never pauses.
+One-time setup:
+1. GitHub: make the repository public; Settings > Pages > Source: **GitHub Actions**.
+2. Supabase: create a personal access token (Account > Access Tokens) and add it to GitHub as the Actions secret
+   `SUPABASE_ACCESS_TOKEN`; then run the "Deploy server (Supabase)" workflow.
+3. Move the data once: double-click `deploy/move-data-to-supabase.cmd` and paste the project's secret key.
+   The function imports it the first time it sees an empty database (on Supabase the "create the SAO account"
+   screen is off, so nobody can take over an empty portal; set the function secret `SAO_ALLOW_SETUP=1` only to
+   start a brand-new portal).
+4. Optional: add `ANTHROPIC_API_KEY` as a function secret (Supabase > Edge Functions > Secrets) for AI memo drafting.
 
-Free-plan limits: the site sleeps after 15 minutes without visitors (the next visit takes about a minute);
-only one copy may run at a time (deploy when nobody is using it).
+`.github/workflows/keep-awake.yml` calls the server daily so the free Supabase project never pauses.
 
 ### Settings (environment variables)
 
@@ -126,7 +131,6 @@ only one copy may run at a time (deploy when nobody is using it).
 | `PORT` | Port the site runs on | `5173` |
 | `SAO_DATA_DIR` | Folder for the database and uploaded files | `data/` in the project |
 | `SAO_SECURE_COOKIES` | Set to `1` when the site runs on HTTPS | off |
-| `SAO_SOFFICE` | Path to LibreOffice's `soffice` if it is not found automatically | auto |
 | `ANTHROPIC_API_KEY` | Claude API key for "Draft with AI" | none |
 
 Windows example:
@@ -157,7 +161,9 @@ Set `SAO_EMAIL` and `SAO_PASSWORD` to the SAO Office account you created (for ex
 | Path | What it is |
 |---|---|
 | `server.js` | Web server and API routes |
-| `server/` | Database (`db.js`), sign-in (`auth.js`), permissions (`access.js`), all data changes (`actions.js`), first-run setup, uploads, PDF conversion, AI memo |
+| `supabase/functions/_shared/core/` | The server code (data, sign-in, permissions, every action, setup, uploads, AI memo) - used by both `server.js` and Supabase |
+| `supabase/functions/sao/` | The Supabase Edge Function that runs that code on Supabase |
+| `config.js` | Where the pages find the server |
 | `index.html`, `app.js`, `styles.css` | The app in the browser |
 | `forms.js` | Form definitions and rules, shared by the browser and the server |
 | `docfill.js` | Fills the Word templates |

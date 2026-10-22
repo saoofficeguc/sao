@@ -197,7 +197,7 @@ const DESIGN_GROUPS = ['marketing', 'printing'];
 const LATE_LIMIT = 4, LATE_BLOCK_MONTHS = 2;
 return { FORMS, SERVICE_GROUPS, CATS, DESIGN_GROUPS, LATE_LIMIT, LATE_BLOCK_MONTHS, workingDaysUntil };
 })();
-// Used by the browser (window.SAO_FORMS) and by the server (require('./forms.js'))
-if (typeof window !== 'undefined') window.SAO_FORMS = SAO_FORMS;
+// Used by the browser and the Supabase function (globalThis.SAO_FORMS) and by Node (require('./forms.js'))
+globalThis.SAO_FORMS = SAO_FORMS;   // browser (window), Supabase function (Deno)
 if (typeof module !== 'undefined') module.exports = SAO_FORMS;
 

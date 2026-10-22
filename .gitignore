@@ -22,3 +22,8 @@ Thumbs.db
 
 # Local tool settings
 .claude/
+
+# Copied in by the deploy job (the real file is forms.js at the top)
+supabase/functions/_shared/forms.js
+supabase/.temp/
+supabase/.branches/

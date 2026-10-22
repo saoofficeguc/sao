@@ -26,13 +26,13 @@ const FILE_TYPES = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg'
 const FileStore = {
   async upload(file) {
     const type = file.type || FILE_TYPES[(file.name.split('.').pop() || '').toLowerCase()] || 'application/octet-stream';
-    const res = await fetch('/api/files', { method: 'POST', headers: { 'Content-Type': type, 'X-File-Name': encodeURIComponent(file.name), 'X-SAO': '1' }, body: file });
+    const res = await fetch(API + '/api/files', { method: 'POST', headers: { ...authHeaders(), 'Content-Type': type, 'X-File-Name': encodeURIComponent(file.name), 'X-SAO': '1' }, body: file });
     const out = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(out.error || 'The file could not be uploaded.');
     return out;
   },
   async get(id) {
-    const res = await fetch('/api/files/' + encodeURIComponent(id));
+    const res = await fetch(API + '/api/files/' + encodeURIComponent(id), { headers: authHeaders() });
     return res.ok ? res.blob() : null;
   },
 };
@@ -89,16 +89,23 @@ function mulberry32(a) {
 // ---------- Server connection ----------
 // `state` holds only what the server sends for the signed-in person. Changes go through act(), then the data is reloaded.
 let state = null;
+// The server address (config.js): empty = same address as the pages; on GitHub Pages it is the Supabase function.
+const API = String(window.SAO_API || '').replace(/[/]+$/, '');
+// Sign-in token, kept in this browser until sign-out (sent as "Authorization: Bearer ...")
+let authToken = (() => { try { return localStorage.getItem('sao-token') || ''; } catch (e) { return ''; } })();
+function setToken(t) { authToken = t || ''; try { if (t) localStorage.setItem('sao-token', t); else localStorage.removeItem('sao-token'); } catch (e) { /* this page only */ } }
+const authHeaders = () => authToken ? { Authorization: 'Bearer ' + authToken } : {};
 async function apiGet(url) {
-  const res = await fetch(url, { headers: { Accept: 'application/json' } });
-  if (res.status === 401) { state = null; await boot(); throw new Error('Please sign in again.'); }
+  const res = await fetch(API + url, { headers: { Accept: 'application/json', ...authHeaders() } });
+  if (res.status === 401) { setToken(''); state = null; await boot(); throw new Error('Please sign in again.'); }
   if (!res.ok) throw new Error('The server did not answer. Check your connection.');
   return res.json();
 }
 async function apiPost(url, body) {
-  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-SAO': '1' }, body: JSON.stringify(body || {}) });
+  const res = await fetch(API + url, { method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json', 'X-SAO': '1' }, body: JSON.stringify(body || {}) });
   const out = await res.json().catch(() => ({}));
-  if (res.status === 401 && url !== '/api/login') { state = null; await boot(); throw new Error('Please sign in again.'); }
+  if (res.status === 401 && url !== '/api/login') { setToken(''); state = null; await boot(); throw new Error('Please sign in again.'); }
+  if (url === '/api/login' && res.ok && out.token) setToken(out.token);
   if (!res.ok) throw new Error(out.error || 'Something went wrong.');
   return out;
 }
@@ -310,7 +317,7 @@ const canSeeFinance = (u, clubId) => u.role === 'sao' || (u.role === 'rep' && u.
 const lateBadge = r => (r.late ? ' <span class="badge red">Late</span>' : '') + (overBalance(r) ? ' <span class="badge amber">Over balance</span>' : '');
 const chip = (kind, label) => `<span class="chip-status ${kind}">${label}</span>`;   // kind: review | approved | action | draft
 function statusBadge(r) {
-  if (r.status === 'completed') return chip('approved', 'Approved - signed PDF with SAO');
+  if (r.status === 'completed') return chip('approved', 'Approved - signed form with SAO');
   if (r.status === 'rejected') return chip('action', `Returned by ${esc(STAGE_LABEL[r.rejection?.stage] || '')}`);
   return chip('review', `In review: ${esc(STAGE_LABEL[r.status])}`);
 }
@@ -456,7 +463,7 @@ const avatar = u => u.role === 'rep' ? clubLogo(u.clubId, 'av') : `<span class="
 const whoName = u => u.role === 'rep' ? clubName(u.clubId) : u.name;
 const whoRole = u => u.role === 'rep' ? 'Club Representative' : (u.title || ROLE_LABEL[u.role]);
 
-async function signOut() { try { await apiPost('/api/logout'); } catch (e) { /* signed out anyway */ } state = null; location.hash = ''; boot(); }
+async function signOut() { try { await apiPost('/api/logout'); } catch (e) { /* signed out anyway */ } setToken(''); state = null; location.hash = ''; boot(); }
 
 function render() {
   destroyCharts(); clearInterval(bannerTimer); clearTimeout(bannerTimer); closeSheet();
@@ -571,8 +578,11 @@ function playIntro() {
 async function boot() {
   await playIntro();
   let s;
-  try { s = await (await fetch('/api/session')).json(); }
-  catch (e) { $('#app').innerHTML = '<div class="login"><div class="login-card"><h2>The server is not running</h2><p class="muted">Start it with <code>node server.js</code> and reload this page.</p></div></div>'; return; }
+  try {
+    s = await (await fetch(API + '/api/session', { headers: authHeaders() })).json();
+    if (s.error) { $('#app').innerHTML = `<div class="login"><div class="login-card login-narrow">${loginHead}<h2>Almost ready</h2><p class="muted">${esc(s.error)}</p><button class="btn key login-btn" onclick="location.reload()">Try again</button></div></div>`; return; }
+  }
+  catch (e) { $('#app').innerHTML = '<div class="login"><div class="login-card login-narrow"><h2>Can\'t reach the portal</h2><p class="muted">Check your internet connection and try again. If it keeps happening, the portal\'s server may be starting up - wait a minute.</p><button class="btn key login-btn" onclick="location.reload()">Try again</button></div></div>'; return; }
   if (s.needsSetup) return renderSetup();
   if (!s.user) return renderLogin(s);
   try { await refresh(); } catch (e) { return; }
@@ -744,7 +754,7 @@ async function aiDraftMemo(m, ctx) {
   const btn = $('#aiDraft', m), status = $('#aiStatus', m);
   btn.disabled = true; status.textContent = 'Drafting...';
   try {
-    const res = await fetch('/api/memo-draft', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-SAO': '1' }, body: JSON.stringify(input) });
+    const res = await fetch(API + '/api/memo-draft', { method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json', 'X-SAO': '1' }, body: JSON.stringify(input) });
     const out = await res.json().catch(() => ({}));
     if (res.ok && out.body) { $('#' + fid('memoBody'), m).value = out.body; status.textContent = 'AI draft inserted - review and edit it before submitting.'; }
     else if (out.error === 'ai_unavailable') { $('#' + fid('memoBody'), m).value = basicMemoDraft(input); status.textContent = 'AI is not set up on this server yet - a basic draft was inserted. Edit it as needed.'; }
@@ -1928,7 +1938,7 @@ function stepperHTML(r) {
     const done = r.approvals.some(a => a.stage === s);
     const rej = r.status === 'rejected' && r.rejection?.stage === s;
     return [STAGE_LABEL[s], done ? 'done' : rej ? 'rejected' : r.status === s ? 'current' : ''];
-  }), ['Signed PDF to SAO', r.status === 'completed' ? 'done' : '']];
+  }), ['Signed form to SAO', r.status === 'completed' ? 'done' : '']];
   return `<div class="stepper">${steps.map(([l, c], i) => `<div class="step ${c}"><div class="dot">${c === 'done' ? '&#10003;' : c === 'rejected' ? '&times;' : i + 1}</div>${l}</div>`).join('')}</div>`;
 }
 
@@ -1954,7 +1964,7 @@ function openRequest(id) {
       ${u.role === 'sao' ? saoChecks(r).map(c => `<label class="chk hardcopy"><input type="checkbox" data-check="${c.key}" ${r.checks?.[c.key] ? 'checked' : ''}> <b>${esc(c.label)}</b></label>`).join('') : ''}
       <div class="actions"><button class="btn key" id="aApprove">Approve &amp; sign</button><button class="btn ghost-danger" id="aReject">Reject</button></div></div>`;
   const pdfBtn = u.role === 'rep' ? '' : r.status === 'completed'
-    ? `<button class="btn primary" id="docxBtn">Download signed PDF</button>${attachmentsOf(r).length ? '<button class="btn" id="zipBtn">PDF + attachments (.zip)</button>' : ''}`
+    ? `<button class="btn primary" id="docxBtn">Download signed form (Word)</button>${attachmentsOf(r).length ? '<button class="btn" id="zipBtn">Form + attachments (.zip)</button>' : ''}`
     : `<button class="btn" id="docxBtn">${r.type === 'expense' ? 'Download memo + form so far' : 'Download form so far (.docx)'}</button>${attachmentsOf(r).length ? '<button class="btn" id="zipBtn">Form + attachments (.zip)</button>' : ''}`;
   const copyBtn = r.status === 'rejected' && u.role === 'rep' ? `<button class="btn" id="copyBtn">Edit &amp; resubmit as new</button>` : '';
   openModal({
@@ -1963,7 +1973,7 @@ function openRequest(id) {
     body: `${stepperHTML(r)}
       ${r.status === 'rejected' ? `<div class="alert red"><b>Rejected by ${esc(r.rejection.name)} (${STAGE_LABEL[r.rejection.stage]})</b> on ${fmtDateTime(r.rejection.at)}<br>${esc(r.rejection.comment)}</div>` : ''}
       ${overBalance(r) ? `<div class="alert amber"><b>Warning:</b> ${money(r.amount)} requested, but the club balance is ${money(clubFinance(r.clubId).balance)}. Approving will take the account below zero.</div>` : ''}
-      ${r.status === 'completed' ? `<div class="alert green">Fully approved on ${fmtDateTime(r.completedAt)}. The signed PDF has been returned to the SAO Office.</div>` : ''}
+      ${r.status === 'completed' ? `<div class="alert green">Fully approved on ${fmtDateTime(r.completedAt)}. The signed form is with the SAO Office (download it and save as PDF in Word).</div>` : ''}
       <div class="meta">
         <div><span>Club</span>${esc(clubName(r.clubId))}</div>
         <div><span>Submitted by</span>${esc(userById(r.createdBy)?.name || '')}</div>
@@ -1997,7 +2007,7 @@ function openRequest(id) {
           remember = $('#aRemember', m).checked;
         }
         act('approveRequest', { id: r.id, signature, remember, comment: $('#aComment', m).value.trim(), hardCopy: !!$('#aHardCopy', m)?.checked, checks },
-          out => out.next ? `Approved and sent to ${STAGE_LABEL[out.next]}` : 'Approved. The signed PDF is back with the SAO Office.');
+          out => out.next ? `Approved and sent to ${STAGE_LABEL[out.next]}` : 'Approved. The signed form is back with the SAO Office.');
       };
       $('#aReject', m).onclick = () => {
         const comment = $('#aComment', m).value.trim();
@@ -2021,9 +2031,9 @@ function pageApprovals(el, u) {
     ${!state.signatures[u.id] ? `<div class="alert blue">Tip: <a href="#signature">save your e-signature</a> once so you can approve with one click.</div>` : ''}
     ${lateFirst ? `<div class="card late-card"><h2>Late submissions &amp; warnings (${latePending.length})</h2><p class="muted small">Late = less than the required working days' notice. Over balance = an expense larger than the club's current balance.</p>${requestTable(latePending, { empty: 'Nothing flagged.' })}</div>` : ''}
     <div class="card"><h2>${lateFirst ? 'On-time requests' : 'Waiting for you'} (${pending.length})</h2>${requestTable(pending, { empty: 'Nothing waiting for you.' })}</div>
-    ${u.role === 'sao' ? `<div class="card"><h2>Final signed PDFs</h2><p class="muted small">Requests approved by the Vice President come back here as a PDF of the official form with all signatures.</p>
+    ${u.role === 'sao' ? `<div class="card"><h2>Final signed forms</h2><p class="muted small">Requests approved by the Vice President come back here as the official Word form with all signatures. Open it and save as PDF (File > Save As > PDF).</p>
       ${!completed.length ? '<div class="empty">No fully approved requests yet.</div>' : `<div class="table-wrap"><table><thead><tr><th>ID</th><th>Club</th><th>Type</th><th>Title</th><th>Approved</th><th></th></tr></thead><tbody>
-      ${completed.map(r => `<tr><td>${r.id}</td><td>${esc(clubName(r.clubId))}</td><td>${esc(formName(r.type))}</td><td class="wrap">${esc(r.title)}</td><td>${fmtDate(r.completedAt)}</td><td><button class="btn sm primary" data-docx="${r.id}">Signed PDF</button> <button class="btn sm" data-zip="${r.id}">+ Attachments</button> <button class="btn sm" data-open="${r.id}">View</button></td></tr>`).join('')}
+      ${completed.map(r => `<tr><td>${r.id}</td><td>${esc(clubName(r.clubId))}</td><td>${esc(formName(r.type))}</td><td class="wrap">${esc(r.title)}</td><td>${fmtDate(r.completedAt)}</td><td><button class="btn sm primary" data-docx="${r.id}">Signed form</button> <button class="btn sm" data-zip="${r.id}">+ Attachments</button> <button class="btn sm" data-open="${r.id}">View</button></td></tr>`).join('')}
       </tbody></table></div>`}</div>
       ${state.announcements.some(a => a.status === 'pending') ? `<div class="alert blue">${state.announcements.filter(a => a.status === 'pending').length} announcement request(s) are waiting. <a href="#announcements">Review them</a>.</div>` : ''}` : ''}
     ${u.role === 'sao' ? `<div class="card"><h2>Signed by me</h2>${requestTable(signedByMe, { empty: 'You have not signed anything yet.' })}</div>` : ''}`;
@@ -2113,42 +2123,20 @@ async function memoDoc(r) {
   window.__lastMemo = { id: r.id, blob, missing };
   return blob;
 }
-async function toPdf(docx) {
-  const res = await fetch('/api/pdf', { method: 'POST', headers: { 'X-SAO': '1' }, body: docx });
-  if (!res.ok) throw new Error('the server could not convert the form to PDF');
-  return res.blob();
-}
-// Fully approved forms are final: the filled Word form converted to PDF by the server (looks exactly like the form).
-// For an Expense Approval the memo comes first, then the expense form, in one PDF.
-async function signedPdf(r) {
-  let pdf;
-  if (r.type === 'expense') {
-    if (!window.PDFLib) throw new Error('the PDF library did not load (needs internet)');
-    const parts = [await toPdf(await memoDoc(r)), await toPdf(await filledForm(r))];
-    const merged = await PDFLib.PDFDocument.create();
-    for (const part of parts) {
-      const src = await PDFLib.PDFDocument.load(await part.arrayBuffer());
-      (await merged.copyPages(src, src.getPageIndices())).forEach(p => merged.addPage(p));
-    }
-    pdf = new Blob([await merged.save()], { type: 'application/pdf' });
-  } else pdf = await toPdf(await filledForm(r));
-  window.__lastPdf = { id: r.id, blob: pdf };
-  return pdf;
-}
 const isFinal = r => r.status === 'completed';
-// Final approval -> signed PDF. Still in progress -> the Word form filled so far (expense: memo + form in a zip).
+// The official Word form, filled in. When fully approved it carries every signature (the SAO saves it as PDF in Word).
+// An Expense Approval comes with its memo: both in one zip.
 async function downloadDocx(r) {
   const final = isFinal(r);
-  toast(final ? 'Preparing the signed PDF...' : 'Filling the form...');
+  toast(final ? 'Preparing the signed form...' : 'Filling the form...');
   try {
-    if (final) saveBlob(await signedPdf(r), fileBase(r) + '.pdf');
-    else if (r.type === 'expense') {
+    if (r.type === 'expense') {
       const zip = new JSZip();
       zip.file(`${r.id} - Memo.docx`, await memoDoc(r));
       zip.file(fileBase(r) + '.docx', await filledForm(r));
       saveBlob(await zip.generateAsync({ type: 'blob' }), fileBase(r) + ' (memo + form).zip');
     } else saveBlob(await filledForm(r), fileBase(r) + '.docx');
-    toast(final ? 'Signed PDF downloaded' : 'Form downloaded', 'success');
+    toast(final ? 'Signed form downloaded (Word)' : 'Form downloaded', 'success');
   } catch (e) { toast('Could not prepare the form: ' + e.message, 'error'); }
 }
 function attachmentsOf(r) {
@@ -2161,9 +2149,8 @@ function attachmentsOf(r) {
 async function downloadPackage(r) {
   try {
     const zip = new JSZip();
-    if (isFinal(r)) zip.file(fileBase(r) + '.pdf', await signedPdf(r));
-    else zip.file(fileBase(r) + '.docx', await filledForm(r));
-    if (!isFinal(r) && r.type === 'expense') zip.file(`${r.id} - Memo.docx`, await memoDoc(r));
+    zip.file(fileBase(r) + '.docx', await filledForm(r));
+    if (r.type === 'expense') zip.file(`${r.id} - Memo.docx`, await memoDoc(r));
     let missingFiles = 0;
     for (const a of attachmentsOf(r)) {
       const blob = await FileStore.get(a.id).catch(() => null);
