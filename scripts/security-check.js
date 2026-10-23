@@ -50,12 +50,28 @@ async function session(email, password = PASS) {
   const r2 = (await rep2.get('/api/state')).data;
   ok(r2.transactions.every(t => t.clubId === 'club-2') && !r2.transactions.some(t => t.clubId === 'club-1'), 'Another club cannot see Robotics Club money');
 
+  // ---- a second rep of the same club ----
+  const rep1b = await session('rep-1b@demo.local');
+  const r1b = (await rep1b.get('/api/state')).data;
+  ok(r1b.transactions.length === rs.transactions.length + 1 && r1b.transactions.every(t => t.clubId === 'club-1'), 'A second rep of a club sees that club\'s money (and only that)');
+  ok((await rep1b.post('/api/actions/saveAccount', { role: 'rep', clubId: 'club-1', name: 'x' })).status === 403, 'A rep cannot add accounts');
+
   // ---- academic advisor ----
   const adv = await session('adv-1@demo.local');
   const as = (await adv.get('/api/state')).data;
   ok(as.transactions.length === 0, 'Advisor receives no bank data');
   ok(as.requests.every(r => r.status === 'advisor'), 'Advisor receives only papers waiting for them');
   ok((await adv.post('/api/actions/deposit', { clubId: 'club-1', gross: 100, source: 'cash' })).status === 403, 'Advisor cannot add money');
+
+  // ---- assistant (after the SAO Office, before the VP; approves without a signature) ----
+  const asst = await session('assistant@demo.local');
+  const ast = (await asst.get('/api/state')).data;
+  ok(ast.requests.length > 0 && ast.requests.every(r => r.status === 'assistant'), 'Assistant receives only papers waiting for the Assistant');
+  ok(ast.transactions.length === 0, 'Assistant receives no bank data');
+  const vpPaper = (await (await session('vp@demo.local')).get('/api/state')).data.requests[0];
+  if (vpPaper) ok((await asst.post('/api/actions/approveRequest', { id: vpPaper.id })).status === 403, 'Assistant cannot approve a paper waiting for the VP');
+  const passed = await asst.post('/api/actions/approveRequest', { id: ast.requests[0].id });
+  ok(passed.status === 200 && passed.data.status === 'vp', 'Assistant approval (no signature) sends the paper to the VP');
 
   // ---- vice president ----
   const vp = await session('vp@demo.local');

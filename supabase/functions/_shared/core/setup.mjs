@@ -33,6 +33,7 @@ export function createSetup(store, auth) {
     } else {
       await store.users.put({ id: 'sao', role: 'sao', name, title: 'Youth Welfare Director', signName });
       await store.users.setLogin('sao', email, auth.hashPassword(b.password));
+      await store.users.put({ id: 'assistant', role: 'assistant', name: 'Assistant', title: 'Assistant', signName: 'Assistant' });
       await store.users.put({ id: 'vp', role: 'vp', name: 'Vice President', title: 'GUC Vice President', signName: 'Vice President' });
       await store.users.put({ id: 'clinic', role: 'clinic', name: 'GUC Clinic', title: 'GUC Clinic', signName: 'GUC Clinic' });
       await store.meta.set('req_seq', 0);

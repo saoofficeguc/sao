@@ -3,7 +3,7 @@
 import crypto from 'node:crypto';
 import { SAO_ACCOUNT, inProgress, canSeeFinance } from './access.mjs';
 
-export const TAX_RATE = 0.14;
+const TAX_RATE = 0.14;
 const UNTAXED = ['allocation', 'transfer'];
 const OUT_CATEGORIES = ['Events & activities', 'Printing & marketing', 'Equipment & materials', 'Catering', 'Transportation', 'Competition fees', 'Expense approvals', 'Other'];
 const SOURCES = ['sponsor', 'cash', 'other', 'allocation', 'transfer'];
@@ -19,7 +19,7 @@ const pad2 = n => String(n).padStart(2, '0');
 const todayISO = () => { const d = new Date(); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
 const isDate = s => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s);
 const text = (v, max = 5000) => (typeof v === 'string' ? v : v == null ? '' : String(v)).trim().slice(0, max);
-export const isImageData = (v, maxBytes, types = ['png', 'jpeg', 'webp']) =>
+const isImageData = (v, maxBytes, types = ['png', 'jpeg', 'webp']) =>
   typeof v === 'string' && new RegExp(`^data:image/(${types.join('|')});base64,[A-Za-z0-9+/=]+$`).test(v) && v.length * 0.75 <= maxBytes;
 
 export function createActions({ store, auth, access, forms }) {
@@ -175,9 +175,12 @@ export function createActions({ store, auth, access, forms }) {
       const r = await store.get('requests', String(b.id));
       need(r, 'Request not found.', 404);
       need(await canAct(user, r), 'This request is not waiting for your signature.', 403);
-      let signature = b.signature;
-      if (!signature) signature = await store.signatures.get(user.id);
-      need(isImageData(signature, 400000, ['png']), 'Please draw your signature first.');
+      // The Assistant only approves (no e-signature); everyone else signs
+      let signature = null;
+      if (user.role !== 'assistant') {
+        signature = b.signature || await store.signatures.get(user.id);
+        need(isImageData(signature, 400000, ['png']), 'Please draw your signature first.');
+      }
       const now = new Date().toISOString();
       if (user.role === 'sao') {
         if (needsHardCopy(r)) { need(b.hardCopy === true, 'Tick "Hard copy of the design received" before approving.'); r.hardCopyAt = r.hardCopyAt || now; }
@@ -279,7 +282,6 @@ export function createActions({ store, auth, access, forms }) {
         const taken = clubs.find(c => c.advisorId === advisorId && c.id !== club?.id);
         need(!taken, `${adv.name} already advises ${taken?.name}.`);
       }
-      const repName = text(b.repName, 100) || `${name} Rep`;
       let c = club;
       if (c) { c.name = name; c.advisorId = advisorId; }
       else {
@@ -287,9 +289,10 @@ export function createActions({ store, auth, access, forms }) {
         c = { id: uid('club'), name, advisorId, accountNo: `1-C15-01-SC-${String(n).padStart(3, '0')}-000-1`, createdAt: new Date().toISOString() };
       }
       await store.put('clubs', c);
-      const rep = (await store.users.all()).find(u => u.role === 'rep' && u.clubId === c.id && !u.disabled);
-      if (rep) { rep.name = repName; await store.users.put(rep); }
-      else await store.users.put({ id: uid('rep'), name: repName, role: 'rep', clubId: c.id, title: 'Club Representative' });
+      // A new club gets its first representative; more are added on the Accounts page
+      if (!(await store.users.all()).some(u => u.role === 'rep' && u.clubId === c.id && !u.disabled)) {
+        await store.users.put({ id: uid('rep'), name: text(b.repName, 100) || `${name} Rep`, role: 'rep', clubId: c.id, title: 'Club Representative' });
+      }
       return { id: c.id };
     },
     async removeClub(user, b) {
@@ -339,13 +342,15 @@ export function createActions({ store, auth, access, forms }) {
     // ---------------- accounts ----------------
     async saveAccount(user, b) {
       onlySao(user);
-      const roles = ['sao', 'vp', 'clinic', 'advisor'];
+      const roles = ['sao', 'assistant', 'vp', 'clinic', 'advisor', 'rep'];
       let u = b.id ? await store.users.get(String(b.id)) : null;
       if (b.id) need(u, 'Account not found.', 404);
       else {
         need(roles.includes(b.role), 'Choose a role.');
         u = { id: uid(b.role === 'advisor' ? 'adv' : b.role), role: b.role };
         if (b.role === 'advisor') u.title = 'Academic Advisor';
+        // A club can have several representatives, each with their own sign-in
+        if (b.role === 'rep') { u.clubId = (await activeClub(String(b.clubId || ''))).id; u.title = 'Club Representative'; }
       }
       const name = text(b.name, 100);
       need(name, 'Type the name.');
@@ -371,6 +376,7 @@ export function createActions({ store, auth, access, forms }) {
       const u = await store.users.get(String(b.id));
       need(u, 'Account not found.', 404);
       need(u.id !== user.id, 'You cannot disable your own account.');
+      if (u.role === 'rep' && !b.disabled) need(!(await store.get('clubs', u.clubId))?.archived, 'This club was removed, so its representatives stay disabled.');
       u.disabled = !!b.disabled; await store.users.put(u);
       if (u.disabled) await auth.endAllSessions(u.id);
       return {};

@@ -160,7 +160,7 @@ const FORMS = {
     fields: sponsorAgreementFields([]),
     services: ['agreed', 'marketing', 'sponsorTech', 'materials', 'logFnb'], deadline: 10, sponsor: true,
     // The GUC Clinic approves the food first; its e-signature goes in the paper's "Clinic Approval" box
-    stages: ['clinic', 'advisor', 'sao', 'vp'],
+    stages: ['clinic', 'advisor', 'sao', 'assistant', 'vp'],
   },
 
   // ---------------- Finance ----------------

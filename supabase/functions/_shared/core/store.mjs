@@ -7,7 +7,7 @@
 
 const DOC_TABLES = { clubs: 1, requests: 1, transactions: 1, announcements: 1 };
 
-export const SCHEMA = {
+const SCHEMA = {
   common: `
     CREATE TABLE IF NOT EXISTS users         (id TEXT PRIMARY KEY, email TEXT UNIQUE, pass TEXT, data TEXT NOT NULL);
     CREATE TABLE IF NOT EXISTS clubs         (id TEXT PRIMARY KEY, data TEXT NOT NULL);

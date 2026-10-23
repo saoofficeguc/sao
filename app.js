@@ -10,10 +10,13 @@ const TAX_RATE = 0.14;               // deducted from every deposit
 const CURRENCY = 'EGP';
 const MAX_FILE_MB = 10;
 
-const STAGES = ['advisor', 'sao', 'vp'];            // default signing order
-const ALL_STAGES = ['clinic', 'advisor', 'sao', 'vp']; // every possible signer step
-const STAGE_LABEL = { clinic: 'GUC Clinic', advisor: 'Academic Advisor', sao: 'SAO Office Head', vp: 'Vice President' };
-const ROLE_LABEL = { rep: 'Club Representative', advisor: 'Academic Advisor', sao: 'SAO Office', vp: 'Vice President', clinic: 'GUC Clinic' };
+const STAGES = ['advisor', 'sao', 'assistant', 'vp'];            // default signing order
+const ALL_STAGES = ['clinic', 'advisor', 'sao', 'assistant', 'vp']; // every possible step
+const STAGE_LABEL = { clinic: 'GUC Clinic', advisor: 'Academic Advisor', sao: 'SAO Office Head', assistant: 'Assistant', vp: 'Vice President' };
+const ROLE_LABEL = { rep: 'Club Representative', advisor: 'Academic Advisor', sao: 'SAO Office', assistant: 'Assistant', vp: 'Vice President', clinic: 'GUC Clinic' };
+const approvesOnly = role => role === 'assistant';   // approves to pass the paper on, without an e-signature
+// Approvals are split by kind of paper (form categories in forms.js)
+const APPROVAL_TABS = [['Events', 'Events'], ['Sponsorship', 'Sponsors'], ['Finance', 'Expense forms']];
 const { FORMS, SERVICE_GROUPS, CATS, DESIGN_GROUPS, LATE_LIMIT, LATE_BLOCK_MONTHS, workingDaysUntil } = window.SAO_FORMS;
 const formName = type => FORMS[type]?.name || type;
 // Signing order for a request (or form type): most forms use STAGES; F&B agreements start with the Clinic
@@ -55,6 +58,7 @@ const NAV = {
   rep:     [['home', 'Home'], ['finance', 'Finance'], ['paperwork', 'Paperwork'], ['announcements', 'Announcements'], ['club', 'Club Profile'], ['signature', 'My E-Signature']],
   advisor: [['home', 'Home'], ['approvals', 'Approvals'], ['signature', 'My E-Signature']],
   sao:     [['home', 'Home'], ['approvals', 'Approvals'], ['paperwork', 'Paperwork'], ['finance', 'Finance'], ['announcements', 'Announcements'], ['clubs', 'Clubs'], ['accounts', 'Accounts'], ['signature', 'My E-Signature']],
+  assistant: [['home', 'Home'], ['approvals', 'Approvals']],
   vp:      [['home', 'Home'], ['approvals', 'Approvals'], ['signature', 'My E-Signature']],
   clinic:  [['home', 'Home'], ['approvals', 'Approvals'], ['signature', 'My E-Signature']],
 };
@@ -74,7 +78,6 @@ const yearOf = d => Number(String(d).slice(0, 4));
 const monthOf = d => Number(String(d).slice(5, 7)) - 1;
 const fmtDate = d => d ? new Date(d.length === 10 ? d + 'T00:00:00' : d).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) : '-';
 const fmtDateTime = d => d ? new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '-';
-const uid = p => p + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 const thisYear = () => new Date().getFullYear();
 
 function mulberry32(a) {
@@ -153,12 +156,14 @@ function seed() {
     .map((name, i) => ({ id: 'adv-' + (i + 1), name }));
   const users = [
     { id: 'sao', name: 'SAO Office', role: 'sao', title: 'Youth Welfare Director', signName: 'Mr. Yehia Al-Razaz' },
+    { id: 'assistant', name: 'Assistant', role: 'assistant', title: 'Assistant', signName: 'Assistant' },
     { id: 'vp', name: 'Dr. Ehab Abo El-Kheir', role: 'vp', title: 'GUC Vice President', signName: 'Dr. Ehab Abo El-Kheir' },
     { id: 'clinic', name: 'GUC Clinic', role: 'clinic', title: 'GUC Clinic', signName: 'GUC Clinic' },
     ...advisors.map(a => ({ ...a, role: 'advisor', title: 'Academic Advisor', signName: a.name })),
   ];
   const clubs = clubNames.map((n, i) => ({ id: 'club-' + (i + 1), name: n, advisorId: advisors[i].id, accountNo: `1-C15-01-SC-${String(i + 1).padStart(3, '0')}-000-1` }));
   clubs.forEach((c, i) => users.push({ id: 'rep-' + (i + 1), name: c.name + ' Rep', role: 'rep', clubId: c.id, title: 'Club Representative' }));
+  users.push({ id: 'rep-1b', name: 'Robotics Club Treasurer', role: 'rep', clubId: 'club-1', title: 'Club Representative' });   // a club can have several reps
 
   // Transactions: last year + this year up to today
   const sponsors = ['Nile Tech', 'Delta Foods', 'Horizon Bank', 'Pyramid Telecom', 'Sunrise Media', 'Atlas Motors', 'Lotus Pharma', 'Cairo Print House'];
@@ -230,7 +235,7 @@ function seed() {
 
   // Paperwork requests at different stages
   const sig = {};
-  users.filter(u => u.role !== 'rep').forEach(u => { sig[u.id] = makeSignature(u.signName); });
+  users.filter(u => u.role !== 'rep' && !approvesOnly(u.role)).forEach(u => { sig[u.id] = makeSignature(u.signName); });
   const fut = k => { const d = new Date(now.getTime() + k * 86400000); return isoDate(d.getFullYear(), d.getMonth(), d.getDate()); };
   const svc = (obj) => Object.fromEntries(Object.entries(obj).map(([g, items]) => [g, { items, other: '' }]));
   const reqSeed = [
@@ -243,6 +248,7 @@ function seed() {
     [12, 'sports', 'advisor', { eventName: 'Inter-faculty Football League', venue: 'Football Field', startDate: fut(18), endDate: fut(40), description: 'League between faculties, matches every Tuesday.', slot: 'After Hours', plan: '16 teams, 2 groups, 20-minute matches, top 2 qualify.', eventType: 'Football', services: svc({ it: ['Speakers'] }) }],
     [13, 'entertainment', 'sao', { eventName: '24h Hackathon Night', venue: 'Engineering Building', startDate: fut(22), endDate: fut(23), marketingPlan: 'Social media + flyers', eventManager: 'Youssef Tarek', description: 'Overnight hackathon with music and games.', slot: 'After Hours', activities: 'Opening, hacking, midnight games, demos, awards.', services: svc({ it: ['Projector', 'Speakers'], technical: ['Electricity', 'AC/ON'], logistics: ['Screen'] }) }],
     [3, 'recruitment', 'vp', { eventName: 'Music Club Recruitment', boothNo: 'B-03', boothCount: '2', startDate: fut(12), endDate: fut(13), marketingPlan: 'Live performance at the booth.', boardTraining: 'Interview skills workshop for board members.', description: 'Recruiting new members for the spring season.', location: 'On Campus', recruitmentPlan: '150 interviewees, 30 new members.', services: svc({ furnitureBooth: ['Table "1"', 'Chairs "2"'], logistics: ['Speakers'] }) }],
+    [4, 'general', 'assistant', { eventName: 'Spring Play Night', venue: 'Main Theatre', startDate: fut(19), endDate: fut(19), marketingPlan: 'Posters, social media and ON SPOT mail.', eventManager: 'Mariam Hesham', description: 'The Drama Club\'s spring play, open to all students.', slot: 'After Hours', activities: '18:00 Doors open\n18:30 Play\n20:30 Cast meet & greet', services: svc({ it: ['Microphones', 'Speakers'], technical: ['Electricity'] }) }],
     [9, 'fnbAgreement', 'advisor', { sponsorName: 'Delta Foods', category: 'Food and Beverages', eventName: 'Chess Open', boothNo: 'F-02', startDate: fut(16), endDate: fut(18), agreedFees: 9000, sponsorDescription: 'Sandwiches and hot drinks during the chess tournament.', boothType: 'Private Booth/Truck', totalKw: '4', deviceKw: '1.5', services: svc({ agreed: ['Booth', 'ONSPOT'], logFnb: ['Truck', 'Coffee Machine'] }) }],
   ];
   let reqNo = 0;
@@ -258,7 +264,7 @@ function seed() {
     for (let s = 0; s < upto; s++) {
       const stage = order[s];
       const signer = stage === 'advisor' ? users.find(u => u.id === club.advisorId) : users.find(u => u.role === stage);
-      r.approvals.push({ stage, userId: signer.id, name: signer.signName || signer.name, title: signer.title, signature: sig[signer.id],
+      r.approvals.push({ stage, userId: signer.id, name: signer.signName || signer.name, title: signer.title, signature: sig[signer.id] || null,
         comment: '', at: new Date(created.getTime() + (s + 1) * 86400000).toISOString() });
     }
     if (status === 'rejected') {
@@ -298,7 +304,7 @@ function visibleClubs(u) {
   if (u.role === 'advisor') return activeClubs().filter(c => c.advisorId === u.id);
   return state.clubs;
 }
-const isSigner = u => ['advisor', 'vp', 'clinic'].includes(u.role);
+const isSigner = u => ['advisor', 'assistant', 'vp', 'clinic'].includes(u.role);
 function visibleRequests(u) {
   if (isSigner(u)) return pendingForMe(u).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   const ids = new Set(visibleClubs(u).map(c => c.id));
@@ -308,7 +314,7 @@ function visibleRequests(u) {
 function canAct(u, r) {
   if (r.status !== u.role) return false;
   if (u.role === 'advisor') return clubById(r.clubId)?.advisorId === u.id;
-  return u.role === 'sao' || u.role === 'vp' || u.role === 'clinic';
+  return ['sao', 'assistant', 'vp', 'clinic'].includes(u.role);
 }
 const pendingForMe = u => state.requests.filter(r => canAct(u, r));
 // Finance is private: a club rep sees only their own club; SAO Office oversees all clubs.
@@ -597,7 +603,7 @@ const GUC_FOOT = '<footer class="guc-foot"><img src="assets/guc-logo.jpg" alt="G
 function renderLogin(s = {}) {
   document.title = 'Sign in - SAO Portal';
   const demo = s.demoAccounts || [];
-  const groups = [['sao', 'SAO Office'], ['vp', 'Vice President'], ['clinic', 'GUC Clinic'], ['advisor', 'Academic Advisors'], ['rep', 'Club Representatives']];
+  const groups = [['sao', 'SAO Office'], ['assistant', 'Assistant'], ['vp', 'Vice President'], ['clinic', 'GUC Clinic'], ['advisor', 'Academic Advisors'], ['rep', 'Club Representatives']];
   $('#app').innerHTML = `<div class="login"><div class="login-card login-narrow">${loginHead}
     <form id="loginForm" autocomplete="on">
       <div class="field"><label for="lEmail">Email</label><input id="lEmail" type="email" autocomplete="username" required placeholder="name@guc.edu.eg"></div>
@@ -674,9 +680,9 @@ function passwordModal() {
 
 // SAO Office: everyone's sign-in (email + password)
 function pageAccounts(el, u) {
-  const groups = [['sao', 'SAO Office'], ['vp', 'Vice President'], ['clinic', 'GUC Clinic'], ['advisor', 'Academic Advisors'], ['rep', 'Club representatives']];
+  const groups = [['sao', 'SAO Office'], ['assistant', 'Assistant'], ['vp', 'Vice President'], ['clinic', 'GUC Clinic'], ['advisor', 'Academic Advisors'], ['rep', 'Club representatives']];
   const people = state.users.filter(x => !(x.role === 'rep' && clubById(x.clubId)?.archived));
-  el.innerHTML = `<div class="page-head"><div><h1>Accounts</h1><p class="muted">Give each person an email and a password to sign in. They can change their password after signing in. Advisors and club reps are created on the Clubs page.</p></div>
+  el.innerHTML = `<div class="page-head"><div><h1>Accounts</h1><p class="muted">Give each person an email and a password to sign in. They can change their password after signing in. A club can have several representatives: add each one here with their own email.</p></div>
       <div class="actions"><button class="btn primary" id="addAcc">+ Add account</button></div></div>
     ${groups.map(([role, label]) => { const list = people.filter(x => x.role === role); return !list.length ? '' : `<div class="card"><h2>${label}</h2><div class="table-wrap"><table>
       <thead><tr><th>Name</th><th>${role === 'rep' || role === 'advisor' ? 'Club' : 'Title'}</th><th>Email (sign-in)</th><th>Status</th><th></th></tr></thead><tbody>
@@ -700,12 +706,14 @@ function accountModal(x) {
   const isNew = !x;
   openModal({
     title: `<h2>${isNew ? 'Add an account' : esc(x.name)}</h2>${isNew ? '' : `<div class="small muted">${esc(ROLE_LABEL[x.role])}</div>`}`,
-    body: `${isNew ? `<div class="field"><label for="acRole">Role</label><select id="acRole"><option value="sao">SAO Office staff</option><option value="advisor">Academic Advisor</option><option value="vp">Vice President</option><option value="clinic">GUC Clinic</option></select></div>
+    body: `${isNew ? `<div class="field"><label for="acRole">Role</label><select id="acRole"><option value="sao">SAO Office staff</option><option value="rep">Club Representative</option><option value="advisor">Academic Advisor</option><option value="assistant">Assistant</option><option value="vp">Vice President</option><option value="clinic">GUC Clinic</option></select></div>
       <div class="field hidden" id="acClubRow"><label for="acClub">Club</label><select id="acClub"><option value="__none">No club yet</option>${freeClubOptions()}</select>
-        <span class="small muted">Only clubs without an advisor are listed.</span></div>` : ''}
+        <span class="small muted">Only clubs without an advisor are listed.</span></div>
+      <div class="field hidden" id="acRepClubRow"><label for="acRepClub">Club</label><select id="acRepClub">${activeClubs().map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select>
+        <span class="small muted">A club can have several representatives; each signs in with their own email.</span></div>` : ''}
       <div class="form-row"><div class="field"><label for="acName">Name</label><input id="acName" value="${esc(x?.name || '')}"></div>
-        ${x?.role === 'rep' ? '' : `<div class="field"><label for="acTitle">Title</label><input id="acTitle" value="${esc(x?.title || '')}" placeholder="e.g. GUC Vice President"></div>`}</div>
-      ${x?.role === 'rep' ? '' : `<div class="field"><label for="acSign">Name on signatures</label><input id="acSign" value="${esc(x?.signName || '')}" placeholder="e.g. Dr. Ehab Abo El-Kheir"></div>`}
+        ${x?.role === 'rep' ? '' : `<div class="field" id="acTitleRow"><label for="acTitle">Title</label><input id="acTitle" value="${esc(x?.title || '')}" placeholder="e.g. GUC Vice President"></div>`}</div>
+      ${x?.role === 'rep' || approvesOnly(x?.role) ? '' : `<div class="field" id="acSignRow"><label for="acSign">Name on signatures</label><input id="acSign" value="${esc(x?.signName || '')}" placeholder="e.g. Dr. Ehab Abo El-Kheir"></div>`}
       <div class="field"><label for="acEmail">Email (to sign in)</label><input id="acEmail" type="email" value="${esc(x?.email || '')}" placeholder="name@guc.edu.eg"></div>
       <div class="field"><label for="acPass">${x?.hasLogin ? 'New password (leave empty to keep the current one)' : 'Password'}</label>
         <div style="display:flex;gap:8px"><input id="acPass" type="text" autocomplete="off"><button class="btn sm" type="button" id="acGen">Generate</button></div>
@@ -714,10 +722,19 @@ function accountModal(x) {
     onMount: m => {
       $('#acGen', m).onclick = () => { $('#acPass', m).value = randomPassword(); };
       if ($('#acRole', m)) {
-        const upd = () => { const adv = $('#acRole', m).value === 'advisor'; $('#acClubRow', m).classList.toggle('hidden', !adv); if (adv && !$('#acTitle', m).value) $('#acTitle', m).value = 'Academic Advisor'; };
+        const upd = () => {
+          const role = $('#acRole', m).value, adv = role === 'advisor', rep = role === 'rep';
+          $('#acClubRow', m).classList.toggle('hidden', !adv);
+          $('#acRepClubRow', m).classList.toggle('hidden', !rep);
+          $('#acTitleRow', m).classList.toggle('hidden', rep);
+          $('#acSignRow', m).classList.toggle('hidden', rep || approvesOnly(role));
+          if (adv && !$('#acTitle', m).value) $('#acTitle', m).value = 'Academic Advisor';
+          if (role === 'assistant' && !$('#acTitle', m).value) $('#acTitle', m).value = 'Assistant';
+        };
         $('#acRole', m).onchange = upd; upd();
       }
-      $('#acSave', m).onclick = () => act('saveAccount', { clubId: $('#acClub', m)?.value,
+      const role = () => isNew ? $('#acRole', m).value : x.role;
+      $('#acSave', m).onclick = () => act('saveAccount', { clubId: role() === 'rep' ? $('#acRepClub', m)?.value : $('#acClub', m)?.value,
         id: x?.id, role: isNew ? $('#acRole', m).value : x.role, name: $('#acName', m).value, title: $('#acTitle', m)?.value, signName: $('#acSign', m)?.value,
         email: $('#acEmail', m).value, password: $('#acPass', m).value || undefined,
       }, 'Account saved');
@@ -871,11 +888,11 @@ function pageClubs(el) {
         <td class="num"><button class="btn sm" data-rename-adv="${a.id}">Rename</button> ${c ? '' : `<button class="btn sm ghost-danger" data-remove-adv="${a.id}">Remove</button>`}</td></tr>`; }).join('')}
       </tbody></table></div></div>
     <div class="clubs-grid">${clubs.map(c => {
-      const rep = state.users.find(x => x.role === 'rep' && x.clubId === c.id && !x.disabled);
+      const reps = clubReps(c.id);
       return `<div class="card club-card">${clubLogo(c.id, 'lg2')}
       <div class="info"><b>${esc(c.name)}</b>
         <div class="small muted">Advisor: ${c.advisorId ? esc(userById(c.advisorId)?.name || '-') : '<span class="badge amber">No advisor yet</span>'}</div>
-        <div class="small muted">Rep: ${esc(rep?.name || '-')} &middot; Balance ${moneyShort(clubFinance(c.id).balance)}</div>
+        <div class="small muted">${reps.length > 1 ? 'Reps' : 'Rep'}: ${esc(reps.map(x => x.name).join(', ') || '-')} &middot; Balance ${moneyShort(clubFinance(c.id).balance)}</div>
         <div class="actions"><button class="btn sm" data-edit-club="${c.id}">Edit</button>
           <label class="btn sm" for="lf-${c.id}">${c.logo ? 'Logo' : 'Add logo'}</label>
           <input id="lf-${c.id}" data-logo="${c.id}" type="file" accept="image/png,image/jpeg,image/svg+xml" class="hidden">
@@ -895,15 +912,18 @@ function pageClubs(el) {
   });
 }
 
-// Add a club, or edit its name / advisor / rep
+// A club's active representatives (a club can have several, each with their own sign-in)
+const clubReps = clubId => state.users.filter(x => x.role === 'rep' && x.clubId === clubId && !x.disabled);
+
+// Add a club (with its first rep), or edit its name / advisor
 function clubModal(club) {
-  const rep = club && state.users.find(x => x.role === 'rep' && x.clubId === club.id && !x.disabled);
   openModal({
     title: `<h2>${club ? 'Edit club' : 'Add a club'}</h2>`,
     body: `<div class="field"><label for="cName">Club name</label><input id="cName" value="${esc(club?.name || '')}" placeholder="e.g. Astronomy Club"></div>
       <div class="field"><label for="cAdv">Academic Advisor</label>${advisorPicker('cAdv', club?.advisorId, club?.id)}
         <span class="small muted">Only advisors without a club are listed - an advisor can advise one club only.</span></div>
-      <div class="field"><label for="cRep">Club representative (account name)</label><input id="cRep" value="${esc(rep?.name || '')}" placeholder="e.g. Astronomy Club Rep"></div>
+      ${club ? '<p class="small muted">Representatives (sign-ins) are managed on the <a href="#accounts" data-close>Accounts</a> page; a club can have several.</p>'
+        : '<div class="field"><label for="cRep">First club representative (account name)</label><input id="cRep" placeholder="e.g. Astronomy Club Rep"><span class="small muted">Add more representatives later on the Accounts page.</span></div>'}
       ${club && club.advisorId ? '<p class="small muted">If you change the advisor, requests waiting for the advisor\'s signature move to the new advisor.</p>' : ''}`,
     foot: `<button class="btn" data-close>Cancel</button><button class="btn primary" id="cSave">${club ? 'Save' : 'Add club'}</button>`,
     onMount: m => {
@@ -911,7 +931,7 @@ function clubModal(club) {
       $('#cSave', m).onclick = () => {
         const name = $('#cName', m).value.trim();
         if (!name) return toast('Type the club name.', 'error');
-        act('saveClub', { id: club?.id, name, ...pickAdvisor(), repName: $('#cRep', m).value.trim() },
+        act('saveClub', { id: club?.id, name, ...pickAdvisor(), repName: $('#cRep', m)?.value.trim() },
           club ? 'Club updated' : `${name} added - set the rep's sign-in on the Accounts page`);
       };
     },
@@ -1096,10 +1116,10 @@ function pageHome(el, u) {
     const vis = visibleRequests(u);
     const annPending = u.role === 'sao' ? state.announcements.filter(a => a.status === 'pending').length : 0;
     const card = `<section class="money-card">
-        <div class="mc-top"><span class="mc-label">Waiting for your signature</span>${BARS}</div>
+        <div class="mc-top"><span class="mc-label">Waiting for your ${approvesOnly(u.role) ? 'approval' : 'signature'}</span>${BARS}</div>
         <div class="mc-amount">${pending.length}</div>
         <div class="mc-sub">${pending.length ? `as ${esc(STAGE_LABEL[u.role])}` : 'You are all caught up.'}</div>
-        <div class="mc-actions">${pending.length ? `<button type="button" class="btn key" id="hReview">${icon('signature')} Review &amp; sign</button>` : ''}<a class="btn ghost-light" href="#approvals">${icon('approvals')} All approvals</a></div>
+        <div class="mc-actions">${pending.length ? `<button type="button" class="btn key" id="hReview">${icon('signature')} ${approvesOnly(u.role) ? 'Review &amp; approve' : 'Review &amp; sign'}</button>` : ''}<a class="btn ghost-light" href="#approvals">${icon('approvals')} All approvals</a></div>
       </section>`;
     const stats = u.role === 'sao' ? `<div class="stat-row">
         <a class="stat" href="#paperwork"><b>${vis.filter(inProgress).length}</b><span>In progress</span></a>
@@ -1114,7 +1134,7 @@ function pageHome(el, u) {
         ${tile('#announcements', 'announcements', 'News', annPending ? `${annPending} to review` : 'Banner')}
       </div>` : `<div class="tiles">
         ${tile('#approvals', 'approvals', 'Approvals', 'Everything waiting')}
-        ${tile('#signature', 'signature', 'E-signature', 'Draw it once')}
+        ${approvesOnly(u.role) ? '' : tile('#signature', 'signature', 'E-signature', 'Draw it once')}
       </div>`;
     body = `<div class="home-grid">
       <div class="home-col">${card}${stats}</div>
@@ -1753,7 +1773,7 @@ function servicesHTML(def, data) {
   return `<h3 class="form-h full">Needed Services</h3><div class="full svc-grid">${def.services.map(g => {
     const G = SERVICE_GROUPS[g], c = cur[g] || { items: [], other: '' };
     const otherBox = G.other || G.specify ? `<input data-svc-other="${g}" placeholder="${G.other ? 'Others - specify' : 'Specify'}" value="${esc(c.other || '')}">` : '';
-    return `<div class="svc"><b>${esc(G.label)}</b>${G.items.map((it, i) => `<label class="chk"><input type="checkbox" data-svc="${g}" value="${esc(it)}" ${c.items.includes(it) ? 'checked' : ''}> ${esc(it)}</label>`).join('')}
+    return `<div class="svc"><b>${esc(G.label)}</b>${G.items.map(it => `<label class="chk"><input type="checkbox" data-svc="${g}" value="${esc(it)}" ${c.items.includes(it) ? 'checked' : ''}> ${esc(it)}</label>`).join('')}
       ${otherBox}</div>`;
   }).join('')}</div>
   ${def.services.some(g => DESIGN_GROUPS.includes(g)) ? `<div class="full design-box hidden" id="designBox"><div class="field"><label for="f_design">Design <span class="req">*</span></label>
@@ -1966,20 +1986,21 @@ function openRequest(id) {
     const a = r.approvals.find(x => x.stage === s);
     const who = s === 'advisor' ? userById(clubById(r.clubId).advisorId)?.name : STAGE_LABEL[s];
     return `<div class="sig-card"><div class="role">${STAGE_LABEL[s]}</div>
-      ${a ? `${u.role === 'rep' ? '<div class="signed-ok">&#10003; Approved</div>' : `<img src="${a.signature}" alt="Signature of ${esc(a.name)}">`}<b>${esc(a.name)}</b><div class="small muted">${fmtDateTime(a.at)}</div>${a.comment ? `<div class="small">"${esc(a.comment)}"</div>` : ''}`
-          : `<div class="pending">${r.status === 'rejected' && r.rejection?.stage === s ? 'Rejected' : 'Not signed yet'}</div><div class="small muted">${esc(who || '')}</div>`}
+      ${a ? `${u.role === 'rep' || !a.signature ? '<div class="signed-ok">&#10003; Approved</div>' : `<img src="${a.signature}" alt="Signature of ${esc(a.name)}">`}<b>${esc(a.name)}</b><div class="small muted">${fmtDateTime(a.at)}</div>${a.comment ? `<div class="small">"${esc(a.comment)}"</div>` : ''}`
+          : `<div class="pending">${r.status === 'rejected' && r.rejection?.stage === s ? 'Rejected' : approvesOnly(s) ? 'Not approved yet' : 'Not signed yet'}</div><div class="small muted">${esc(who || '')}</div>`}
     </div>`;
   }).join('');
-  const acting = canAct(u, r);
+  const acting = canAct(u, r), noSign = approvesOnly(u.role);
   const saved = state.signatures[u.id];
   const details = formDetailsHTML(r);
   const actPanel = !acting ? '' : `<div class="act-panel"><h3>Your decision as ${STAGE_LABEL[u.role]}</h3>
       <div class="field"><label for="aComment">Comment (required if you reject)</label><textarea id="aComment" style="min-height:60px"></textarea></div>
-      ${saved ? `<div class="field"><label>Your saved e-signature will be applied</label><img class="sig-preview" src="${saved}" alt="Your signature"><span class="small muted">Change it in <a href="#signature" data-close>My E-Signature</a>.</span></div>`
+      ${noSign ? '<p class="small muted">Approving sends this paper on to the Vice President. No e-signature is needed.</p>'
+        : saved ? `<div class="field"><label>Your saved e-signature will be applied</label><img class="sig-preview" src="${saved}" alt="Your signature"><span class="small muted">Change it in <a href="#signature" data-close>My E-Signature</a>.</span></div>`
               : `<div class="field"><label>Draw your e-signature</label>${padHTML('aPad')}<div class="actions" style="margin-top:6px"><button class="btn sm" id="aClear" type="button">Clear</button><label class="small"><input type="checkbox" id="aRemember" checked style="width:auto"> Save as my signature for next time</label></div></div>`}
       ${u.role === 'sao' && needsHardCopy(r) ? `<label class="chk hardcopy"><input type="checkbox" id="aHardCopy" ${r.hardCopyAt ? 'checked' : ''}> <b>Hard copy of the design received at the office</b></label>` : ''}
       ${u.role === 'sao' ? saoChecks(r).map(c => `<label class="chk hardcopy"><input type="checkbox" data-check="${c.key}" ${r.checks?.[c.key] ? 'checked' : ''}> <b>${esc(c.label)}</b></label>`).join('') : ''}
-      <div class="actions"><button class="btn key" id="aApprove">Approve &amp; sign</button><button class="btn ghost-danger" id="aReject">Reject</button></div></div>`;
+      <div class="actions"><button class="btn key" id="aApprove">${noSign ? 'Approve' : 'Approve &amp; sign'}</button><button class="btn ghost-danger" id="aReject">Reject</button></div></div>`;
   const pdfBtn = u.role === 'rep' ? '' : r.status === 'completed'
     ? `<button class="btn primary" id="docxBtn">Download signed form (Word)</button>${attachmentsOf(r).length ? '<button class="btn" id="zipBtn">Form + attachments (.zip)</button>' : ''}`
     : `<button class="btn" id="docxBtn">${r.type === 'expense' ? 'Download memo + form so far' : 'Download form so far (.docx)'}</button>${attachmentsOf(r).length ? '<button class="btn" id="zipBtn">Form + attachments (.zip)</button>' : ''}`;
@@ -2007,7 +2028,7 @@ function openRequest(id) {
       if ($('#copyBtn', m)) $('#copyBtn', m).onclick = () => formModal(u, r.type, r.data);
       $$('[data-file]', m).forEach(a => a.onclick = e => { e.preventDefault(); openStoredFile(details.files[Number(a.dataset.file)]); });
       if (!acting) return;
-      const pad = saved ? null : createPad($('#aPad', m));
+      const pad = saved || noSign ? null : createPad($('#aPad', m));
       if (pad) $('#aClear', m).onclick = () => pad.clear();
       $('#aApprove', m).onclick = () => {
         if (u.role === 'sao' && needsHardCopy(r) && !$('#aHardCopy', m).checked) return toast('Tick "Hard copy of the design received" before approving.', 'error');
@@ -2018,7 +2039,7 @@ function openRequest(id) {
           saoChecks(r).forEach(c => { checks[c.key] = true; });
         }
         let signature = null, remember = false;
-        if (!saved) {
+        if (pad) {
           if (pad.isEmpty()) return toast('Please draw your signature first.', 'error');
           signature = pad.toDataURL();
           remember = $('#aRemember', m).checked;
@@ -2036,16 +2057,26 @@ function openRequest(id) {
 }
 
 // ---------- Approvals ----------
+let approvalsTab = null;   // the chosen tab (Events / Sponsors / Expense forms), kept while the page is reloaded
 function pageApprovals(el, u) {
-  const allPending = pendingForMe(u).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  const myPending = pendingForMe(u);
+  const pendingIn = cat => myPending.filter(r => FORMS[r.type]?.cat === cat);
+  if (!APPROVAL_TABS.some(([c]) => c === approvalsTab)) approvalsTab = (APPROVAL_TABS.find(([c]) => pendingIn(c).length) || APPROVAL_TABS[0])[0];
+  const inTab = r => FORMS[r.type]?.cat === approvalsTab;
+  const allPending = pendingIn(approvalsTab).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   const lateFirst = u.role === 'sao';
   const flagged = r => r.late || overBalance(r);
   const pending = lateFirst ? allPending.filter(r => !flagged(r)) : allPending;
   const latePending = lateFirst ? allPending.filter(flagged) : [];
-  const signedByMe = state.requests.filter(r => r.approvals.some(a => a.userId === u.id)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  const completed = state.requests.filter(r => r.status === 'completed').sort((a, b) => (b.completedAt || '').localeCompare(a.completedAt || ''));
-  el.innerHTML = `<div class="page-head"><div><h1>Approvals</h1><p class="muted">Requests waiting for your signature as ${STAGE_LABEL[u.role]}.</p></div></div>
-    ${!state.signatures[u.id] ? `<div class="alert blue">Tip: <a href="#signature">save your e-signature</a> once so you can approve with one click.</div>` : ''}
+  const signedByMe = state.requests.filter(r => inTab(r) && r.approvals.some(a => a.userId === u.id)).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const completed = state.requests.filter(r => inTab(r) && r.status === 'completed').sort((a, b) => (b.completedAt || '').localeCompare(a.completedAt || ''));
+  // Papers wait at the Assistant step until someone has an Assistant sign-in
+  const noAssistant = u.role === 'sao' && !state.users.some(x => x.role === 'assistant' && !x.disabled && x.hasLogin);
+  el.innerHTML = `<div class="page-head"><div><h1>Approvals</h1><p class="muted">Requests waiting for your ${approvesOnly(u.role) ? 'approval' : 'signature'} as ${STAGE_LABEL[u.role]}.</p></div></div>
+    <div class="seg approval-tabs" role="group" aria-label="Kind of paper">${APPROVAL_TABS.map(([cat, label]) => { const n = pendingIn(cat).length;
+      return `<button type="button" data-tab="${cat}" aria-pressed="${cat === approvalsTab}">${label}${n ? ` <span class="seg-count">${n}</span>` : ''}</button>`; }).join('')}</div>
+    ${noAssistant ? `<div class="alert amber">No one can sign in as the Assistant yet, so papers you approve will wait at the Assistant step. <a href="#accounts">Set up the Assistant's sign-in</a>.</div>` : ''}
+    ${!approvesOnly(u.role) && !state.signatures[u.id] ? `<div class="alert blue">Tip: <a href="#signature">save your e-signature</a> once so you can approve with one click.</div>` : ''}
     ${lateFirst ? `<div class="card late-card"><h2>Late submissions &amp; warnings (${latePending.length})</h2><p class="muted small">Late = less than the required working days' notice. Over balance = an expense larger than the club's current balance.</p>${requestTable(latePending, { empty: 'Nothing flagged.' })}</div>` : ''}
     <div class="card"><h2>${lateFirst ? 'On-time requests' : 'Waiting for you'} (${pending.length})</h2>${requestTable(pending, { empty: 'Nothing waiting for you.' })}</div>
     ${u.role === 'sao' ? `<div class="card"><h2>Final signed forms</h2><p class="muted small">Requests approved by the Vice President come back here as the official Word form with all signatures. Open it and save as PDF (File > Save As > PDF).</p>
@@ -2055,6 +2086,7 @@ function pageApprovals(el, u) {
       ${state.announcements.some(a => a.status === 'pending') ? `<div class="alert blue">${state.announcements.filter(a => a.status === 'pending').length} announcement request(s) are waiting. <a href="#announcements">Review them</a>.</div>` : ''}` : ''}
     ${u.role === 'sao' ? `<div class="card"><h2>Signed by me</h2>${requestTable(signedByMe, { empty: 'You have not signed anything yet.' })}</div>` : ''}`;
   bindRequestRows(el);
+  $$('[data-tab]', el).forEach(b => b.onclick = () => { approvalsTab = b.dataset.tab; pageApprovals(el, u); });
   $$('[data-docx]', el).forEach(b => b.onclick = () => downloadDocx(state.requests.find(r => r.id === b.dataset.docx)));
   $$('[data-zip]', el).forEach(b => b.onclick = () => downloadPackage(state.requests.find(r => r.id === b.dataset.zip)));
   $$('[data-open]', el).forEach(b => b.onclick = () => openRequest(b.dataset.open));

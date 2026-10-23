@@ -1,11 +1,12 @@
 // Who may see and do what. The server sends each person only the data they are allowed to see.
 export const SAO_ACCOUNT = 'sao';
-export const STAGES = ['advisor', 'sao', 'vp'];
-export const ALL_STAGES = ['clinic', 'advisor', 'sao', 'vp'];
+// The Assistant comes after the SAO Office and before the VP: approves (no signature) to send the paper on to the VP
+const STAGES = ['advisor', 'sao', 'assistant', 'vp'];
+const ALL_STAGES = ['clinic', 'advisor', 'sao', 'assistant', 'vp'];
 export const inProgress = r => ALL_STAGES.includes(r.status);
-export const isSigner = u => ['advisor', 'vp', 'clinic'].includes(u.role);
+const isSigner = u => ['advisor', 'assistant', 'vp', 'clinic'].includes(u.role);
 // What a user record looks like to others (no email, no login details)
-export const publicUser = u => ({ id: u.id, name: u.name, role: u.role, title: u.title, signName: u.signName, clubId: u.clubId || undefined, disabled: !!u.disabled });
+const publicUser = u => ({ id: u.id, name: u.name, role: u.role, title: u.title, signName: u.signName, clubId: u.clubId || undefined, disabled: !!u.disabled });
 // Club money: a club rep sees only their own club; the SAO Office sees every account
 export const canSeeFinance = (user, accountId) => user.role === 'sao' || (user.role === 'rep' && user.clubId === accountId && accountId !== SAO_ACCOUNT);
 
@@ -19,7 +20,7 @@ export function createAccess(store, forms) {
       const club = clubs.find(c => c && c.id === r.clubId);
       return !!club && !club.archived && club.advisorId === user.id;
     }
-    return ['sao', 'vp', 'clinic'].includes(user.role);
+    return ['sao', 'assistant', 'vp', 'clinic'].includes(user.role);
   }
   async function canAct(user, r) {
     const clubs = user && user.role === 'advisor' ? [await store.get('clubs', r.clubId)] : [];

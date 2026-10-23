@@ -25,10 +25,11 @@ stop the server and delete `data/`.
 | Account | Can see and do |
 |---|---|
 | SAO Office (main account) | Everything: every club's bank account, all paperwork and its status, announcements, approvals, final signed forms, clubs, advisors and accounts. Signs as Youth Welfare Director (Mr. Yehia Al-Razaz) |
+| Assistant | Only the papers the SAO Office approved, waiting to go to the Vice President. Approves them (no e-signature) or returns them with a comment |
 | Vice President (Dr. Ehab Abo El-Kheir) | Only the papers waiting for his signature |
 | Academic Advisors (one per club) | Only the papers from their club waiting for their signature |
 | GUC Clinic | Only Food & Beverages Sponsorship Agreements waiting for its signature (it signs first) |
-| Club Representatives (students) | Their own club's bank account, submitting requests and announcements, and a status window on Home showing where each request is |
+| Club Representatives (students, several per club) | Their own club's bank account, submitting requests and announcements, and a status window on Home showing where each request is |
 
 These rules are enforced by the server, not just hidden in the page: a person's browser only ever
 receives the data they are allowed to see, and every change is checked again on the server.
@@ -37,8 +38,10 @@ receives the data they are allowed to see, and every change is checked again on 
 
 The SAO Office manages sign-ins on the **Accounts** page:
 
-- Give each person (advisor, rep, VP, Clinic) an email and a starting password. Passwords need at least
+- Give each person (SAO staff, advisor, rep, Assistant, VP, Clinic) an email and a starting password. Passwords need at least
   8 characters with letters and numbers.
+- A club can have several representatives: **Add account** > Club Representative > choose the club. Each one signs in
+  with their own email and sees the same club.
 - Disable an account to block sign-in at once (for example when a rep graduates).
 - Everyone can change their own password with the **Password** button at the top.
 - After 8 wrong passwords, sign-in for that email is locked for 15 minutes.
@@ -59,7 +62,8 @@ The SAO Office manages sign-ins on the **Accounts** page:
   - Sponsorship: Sponsorship Agreement, Food & Beverages Sponsorship Agreement (Clinic signs first)
   - Finance: Expense Approval with a **memo** ("Draft with AI" helps), printed on `templates/memo.docx`.
     When the Vice President approves, the amount is taken from the club account automatically.
-  - Chain: Club Rep -> (Clinic) -> Academic Advisor -> SAO Office Head -> Vice President -> signed form back to SAO Office.
+  - Chain: Club Rep -> (Clinic) -> Academic Advisor -> SAO Office Head -> Assistant (approves, no signature) -> Vice President -> signed form back to SAO Office.
+  - The **Approvals** page is split into Events, Sponsors and Expense forms.
     Any signer can reject with a comment; the club can resubmit.
   - Late-submission rules (10 working days, 4 lates then a 2-month block) and required attachments are checked on the server.
 - **Downloads** are the original Word forms, filled in. Final approvals are PDFs (memo + form for expenses).
@@ -142,7 +146,7 @@ set ANTHROPIC_API_KEY=your-key
 node server.js
 ```
 
-Other settings: `TAX_RATE` (0.14) and `CURRENCY` ('EGP') at the top of `app.js` and in `server/actions.js`.
+Other settings: `TAX_RATE` (0.14) and `CURRENCY` ('EGP') at the top of `app.js` and in `supabase/functions/_shared/core/actions.mjs`.
 To update a form, replace its file in `templates/` (keep the same box labels so the filler can find them).
 
 ## Security check
