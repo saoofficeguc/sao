@@ -916,6 +916,12 @@ button.user-chip .who span { font-size: 12px; color: var(--muted); }
 .seg button { border: 0; background: none; padding: 6px 12px; border-radius: 999px; font: 600 13px 'Source Sans 3', sans-serif; color: var(--muted); cursor: pointer; }
 .seg button[aria-pressed="true"] { background: var(--guc-black); color: #fff; }
 [data-theme="dark"] .seg button[aria-pressed="true"] { background: #F2F2EE; color: #121212; }
+/* Accounts: each club once, with its sign-ins under it */
+.acc-club { padding: 14px 0; border-top: 1px solid var(--border); }
+.acc-club:first-of-type { border-top: 0; padding-top: 4px; }
+.acc-club-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+.acc-club-head .btn { margin-left: auto; }
+.acc-club .empty { padding: 8px 0; text-align: left; }
 /* Approvals: Events / Sponsors / Expense forms */
 .approval-tabs { margin-bottom: 16px; max-width: 100%; }
 .approval-tabs button { padding: 8px 16px; font-size: 14px; display: inline-flex; align-items: center; gap: 6px; }

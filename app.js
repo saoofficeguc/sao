@@ -680,20 +680,30 @@ function passwordModal() {
 
 // SAO Office: everyone's sign-in (email + password)
 function pageAccounts(el, u) {
-  const groups = [['sao', 'SAO Office'], ['assistant', 'Assistant'], ['vp', 'Vice President'], ['clinic', 'GUC Clinic'], ['advisor', 'Academic Advisors'], ['rep', 'Club representatives']];
-  const people = state.users.filter(x => !(x.role === 'rep' && clubById(x.clubId)?.archived));
-  el.innerHTML = `<div class="page-head"><div><h1>Accounts</h1><p class="muted">Give each person an email and a password to sign in. They can change their password after signing in. A club can have several representatives: add each one here with their own email.</p></div>
-      <div class="actions"><button class="btn primary" id="addAcc">+ Add account</button></div></div>
-    ${groups.map(([role, label]) => { const list = people.filter(x => x.role === role); return !list.length ? '' : `<div class="card"><h2>${label}</h2><div class="table-wrap"><table>
-      <thead><tr><th>Name</th><th>${role === 'rep' || role === 'advisor' ? 'Club' : 'Title'}</th><th>Email (sign-in)</th><th>Status</th><th></th></tr></thead><tbody>
-      ${list.map(x => { const ac = role === 'advisor' ? advisorClub(x.id) : null; return `<tr><td><b>${esc(x.name)}</b>${x.id === u.id ? ' <span class="small muted">(you)</span>' : ''}</td>
-        <td>${role === 'rep' ? clubCell(x.clubId) : role === 'advisor' ? (ac ? clubCell(ac.id) : '<span class="badge amber">No club</span>') : esc(x.title || '')}</td>
+  const groups = [['sao', 'SAO Office'], ['assistant', 'Assistant'], ['vp', 'Vice President'], ['clinic', 'GUC Clinic'], ['advisor', 'Academic Advisors']];
+  const people = state.users.filter(x => x.role !== 'rep');
+  const row = (x, second) => `<tr><td><b>${esc(x.name)}</b>${x.id === u.id ? ' <span class="small muted">(you)</span>' : ''}</td>
+        ${second == null ? '' : `<td>${second}</td>`}
         <td>${x.email ? esc(x.email) : '<span class="muted">-</span>'}</td>
         <td>${x.disabled ? '<span class="badge gray">Disabled</span>' : x.hasLogin ? '<span class="badge green">Can sign in</span>' : '<span class="badge amber">No login yet</span>'}</td>
         <td class="num"><button class="btn sm" data-acc="${x.id}">${x.hasLogin ? 'Edit' : 'Set login'}</button>
-          ${x.id !== u.id ? `<button class="btn sm ${x.disabled ? '' : 'ghost-danger'}" data-dis="${x.id}" data-v="${x.disabled ? 0 : 1}">${x.disabled ? 'Enable' : 'Disable'}</button>` : ''}</td></tr>`; }).join('')}
-      </tbody></table></div></div>`; }).join('')}`;
+          ${x.id !== u.id ? `<button class="btn sm ${x.disabled ? '' : 'ghost-danger'}" data-dis="${x.id}" data-v="${x.disabled ? 0 : 1}">${x.disabled ? 'Enable' : 'Disable'}</button>` : ''}</td></tr>`;
+  // Each club is listed once, with all of its sign-ins (a club can have several representatives)
+  const clubBlock = c => { const list = state.users.filter(x => x.role === 'rep' && x.clubId === c.id);
+    return `<div class="acc-club"><div class="acc-club-head">${clubCell(c.id)}<span class="small muted">${list.length} account${list.length === 1 ? '' : 's'}</span>
+        <button class="btn sm" data-add-rep="${c.id}">+ Add account</button></div>
+      ${list.length ? `<div class="table-wrap"><table><thead><tr><th>Name</th><th>Email (sign-in)</th><th>Status</th><th></th></tr></thead><tbody>${list.map(x => row(x)).join('')}</tbody></table></div>`
+        : '<div class="empty small">No accounts yet.</div>'}</div>`; };
+  el.innerHTML = `<div class="page-head"><div><h1>Accounts</h1><p class="muted">Give each person an email and a password to sign in. They can change their password after signing in. Each club can have several accounts: use "+ Add account" next to the club.</p></div>
+      <div class="actions"><button class="btn primary" id="addAcc">+ Add account</button></div></div>
+    ${groups.map(([role, label]) => { const list = people.filter(x => x.role === role); return !list.length ? '' : `<div class="card"><h2>${label}</h2><div class="table-wrap"><table>
+      <thead><tr><th>Name</th><th>${role === 'advisor' ? 'Club' : 'Title'}</th><th>Email (sign-in)</th><th>Status</th><th></th></tr></thead><tbody>
+      ${list.map(x => { const ac = role === 'advisor' ? advisorClub(x.id) : null;
+        return row(x, role === 'advisor' ? (ac ? clubCell(ac.id) : '<span class="badge amber">No club</span>') : esc(x.title || '')); }).join('')}
+      </tbody></table></div></div>`; }).join('')}
+    <div class="card"><h2>Clubs</h2>${activeClubs().map(clubBlock).join('') || '<div class="empty">No clubs yet.</div>'}</div>`;
   $('#addAcc').onclick = () => accountModal(null);
+  $$('[data-add-rep]', el).forEach(b => b.onclick = () => accountModal(null, b.dataset.addRep));
   $$('[data-acc]', el).forEach(b => b.onclick = () => accountModal(userById(b.dataset.acc)));
   $$('[data-dis]', el).forEach(b => b.onclick = () => {
     const x = userById(b.dataset.dis), disable = b.dataset.v === '1';
@@ -702,11 +712,12 @@ function pageAccounts(el, u) {
   });
 }
 function randomPassword() { const c = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'; const a = new Uint32Array(10); crypto.getRandomValues(a); return [...a].map(n => c[n % c.length]).join('') + '7'; }
-function accountModal(x) {
+// repClubId: add an account straight to that club (from the club's "+ Add account" button)
+function accountModal(x, repClubId) {
   const isNew = !x;
   openModal({
-    title: `<h2>${isNew ? 'Add an account' : esc(x.name)}</h2>${isNew ? '' : `<div class="small muted">${esc(ROLE_LABEL[x.role])}</div>`}`,
-    body: `${isNew ? `<div class="field"><label for="acRole">Role</label><select id="acRole"><option value="sao">SAO Office staff</option><option value="rep">Club Representative</option><option value="advisor">Academic Advisor</option><option value="assistant">Assistant</option><option value="vp">Vice President</option><option value="clinic">GUC Clinic</option></select></div>
+    title: `<h2>${isNew ? (repClubId ? `Add an account to ${esc(clubName(repClubId))}` : 'Add an account') : esc(x.name)}</h2>${isNew ? '' : `<div class="small muted">${esc(ROLE_LABEL[x.role])}${x.role === 'rep' ? ` - ${esc(clubName(x.clubId))}` : ''}</div>`}`,
+    body: `${isNew ? `<div class="field ${repClubId ? 'hidden' : ''}"><label for="acRole">Role</label><select id="acRole"><option value="sao">SAO Office staff</option><option value="rep">Club Representative</option><option value="advisor">Academic Advisor</option><option value="assistant">Assistant</option><option value="vp">Vice President</option><option value="clinic">GUC Clinic</option></select></div>
       <div class="field hidden" id="acClubRow"><label for="acClub">Club</label><select id="acClub"><option value="__none">No club yet</option>${freeClubOptions()}</select>
         <span class="small muted">Only clubs without an advisor are listed.</span></div>
       <div class="field hidden" id="acRepClubRow"><label for="acRepClub">Club</label><select id="acRepClub">${activeClubs().map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select>
@@ -722,10 +733,11 @@ function accountModal(x) {
     onMount: m => {
       $('#acGen', m).onclick = () => { $('#acPass', m).value = randomPassword(); };
       if ($('#acRole', m)) {
+        if (repClubId) { $('#acRole', m).value = 'rep'; $('#acRepClub', m).value = repClubId; }
         const upd = () => {
           const role = $('#acRole', m).value, adv = role === 'advisor', rep = role === 'rep';
           $('#acClubRow', m).classList.toggle('hidden', !adv);
-          $('#acRepClubRow', m).classList.toggle('hidden', !rep);
+          $('#acRepClubRow', m).classList.toggle('hidden', !rep || !!repClubId);
           $('#acTitleRow', m).classList.toggle('hidden', rep);
           $('#acSignRow', m).classList.toggle('hidden', rep || approvesOnly(role));
           if (adv && !$('#acTitle', m).value) $('#acTitle', m).value = 'Academic Advisor';
